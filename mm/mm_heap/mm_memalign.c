@@ -27,6 +27,7 @@
 #include <assert.h>
 
 #include <nuttx/mm/mm.h>
+#include <nuttx/itm/itm.h>
 
 #include "mm_heap/mm.h"
 #include "kasan/kasan.h"
@@ -228,5 +229,6 @@ FAR void *mm_memalign(FAR struct mm_heap_s *heap, size_t alignment,
   kasan_unpoison((FAR void *)alignedchunk,
                  mm_malloc_size((FAR void *)alignedchunk));
 
+  EMDBG_LOG_HEAP_MEMALIGN(rawchunk, size, alignedchunk);
   return (FAR void *)alignedchunk;
 }

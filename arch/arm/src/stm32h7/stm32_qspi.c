@@ -50,8 +50,10 @@
 
 #include "stm32_gpio.h"
 #include "stm32_dma.h"
+// #include "stm32_mdma.h"
 #include "stm32_rcc.h"
 #include "hardware/stm32_qspi.h"
+#include "hardware/stm32_mdma.h"
 
 #ifdef CONFIG_STM32H7_QUADSPI
 
@@ -69,6 +71,13 @@
 #define ALIGN_MASK        3
 #define ALIGN_UP(n)       (((n)+ALIGN_MASK) & ~ALIGN_MASK)
 #define IS_ALIGNED(n)     (((uint32_t)(n) & ALIGN_MASK) == 0)
+
+/* Missing register definitions *********************************************/
+
+/* QSPI_CR_DMAEN bit is reserved on STM32H7 but kept for software compatibility */
+#ifndef QSPI_CR_DMAEN
+#define QSPI_CR_DMAEN              (1 << 2)   /* Bit 2: DMA Enable (reserved, software compatibility) */
+#endif
 
 /* Debug ********************************************************************/
 
@@ -104,24 +113,27 @@
 
 #  ifdef DMAMAP_QUADSPI
 
-/* QSPI DMA Channel/Stream selection.  There
- * are multiple DMA stream options that must be dis-ambiguated in the board.h
- * file.
+/* QSPI MDMA Channel selection.  There
+ * are multiple MDMA channel options that must be dis-ambiguated in the board.h
+ * file. For STM32H7, QSPI uses MDMA instead of regular DMA.
  */
 
 #    define DMACHAN_QUADSPI           DMAMAP_QUADSPI
+#  else
+/* Default MDMA channel for QSPI if not specified in board.h */
+#    define DMACHAN_QUADSPI           DMAP_MDMA_QUADSPI_FT
 #  endif
 
 #  if defined(CONFIG_STM32H7_QSPI_DMAPRIORITY_LOW)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRILO
+#    define QSPI_DMA_PRIO  MDMA_CCR_PL_LOW
 #  elif defined(CONFIG_STM32H7_QSPI_DMAPRIORITY_MEDIUM)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIMED
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIMED
 #  elif defined(CONFIG_STM32H7_QSPI_DMAPRIORITY_HIGH)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIHI
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIHI
 #  elif defined(CONFIG_STM32H7_QSPI_DMAPRIORITY_VERYHIGH)
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIVERYHI
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIVERYHI
 #  else
-#    define QSPI_DMA_PRIO  DMA_SCR_PRIMED
+#    define QSPI_DMA_PRIO  MDMA_CCR_PRIMED
 #  endif
 
 #endif /* CONFIG_STM32H7_QSPI_DMA */
@@ -1432,14 +1444,14 @@ static void qspi_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
   if (priv->result == -EBUSY)
     {
       /* Save the result of the transfer if no error was previously
-       * reported
+       * reported. For MDMA, we check different interrupt flags.
        */
 
-      if (isr & DMA_STREAM_TCIF_BIT)
+      if (isr & 0x02) /* MDMA Transfer Complete Interrupt */
         {
           priv->result = OK;
         }
-      else if (isr & DMA_STREAM_TEIF_BIT)
+      else if (isr & 0x01) /* MDMA Transfer Error Interrupt */
         {
           priv->result = -EIO;
         }
@@ -1472,7 +1484,7 @@ static inline uintptr_t qspi_regaddr(struct stm32h7_qspidev_s *priv,
  * Name: qspi_memory_dma
  *
  * Description:
- *   Perform one QSPI memory transfer using DMA
+ *   Perform one QSPI memory transfer using MDMA
  *
  * Input Parameters:
  *   priv    - Device-specific state data
@@ -1488,6 +1500,7 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
                            struct qspi_meminfo_s *meminfo,
                            struct qspi_xctnspec_s *xctn)
 {
+  stm32_dmacfg_t dmacfg;
   uint32_t dmaflags;
   uint32_t regval;
   int ret;
@@ -1496,28 +1509,33 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
 
   qspi_dma_sampleinit(priv);
 
-  /* Determine DMA flags and setup the DMA */
+  /* Determine MDMA flags and setup the MDMA */
 
   if (QSPIMEM_ISWRITE(meminfo->flags))
     {
-      /* Setup the DMA (memory-to-peripheral) */
+      /* Setup the MDMA (memory-to-peripheral) */
 
-      dmaflags = (QSPI_DMA_PRIO | DMA_SCR_MSIZE_8BITS |
-                  DMA_SCR_PSIZE_8BITS | DMA_SCR_MINC | DMA_SCR_DIR_M2P);
+      dmaflags = (QSPI_DMA_PRIO | MDMA_CCR_TCIE | MDMA_CCR_TEIE);
 
       up_clean_dcache((uintptr_t)meminfo->buffer,
                       (uintptr_t)meminfo->buffer + meminfo->buflen);
     }
   else
     {
-      /* Setup the DMA (peripheral-to-memory) */
+      /* Setup the MDMA (peripheral-to-memory) */
 
-      dmaflags = (QSPI_DMA_PRIO | DMA_SCR_MSIZE_8BITS |
-                  DMA_SCR_PSIZE_8BITS | DMA_SCR_MINC | DMA_SCR_DIR_P2M);
+      dmaflags = (QSPI_DMA_PRIO | MDMA_CCR_TCIE | MDMA_CCR_TEIE);
     }
 
-  stm32_dmasetup(priv->dmach, qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET),
-                 (uint32_t)meminfo->buffer, meminfo->buflen, dmaflags);
+  /* Configure the DMA */
+
+  dmacfg.paddr = qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET);
+  dmacfg.maddr = (uint32_t)meminfo->buffer;
+  dmacfg.ndata = meminfo->buflen;
+  dmacfg.cfg1  = dmaflags;
+  dmacfg.cfg2  = 0;
+
+  stm32_dmasetup(priv->dmach, &dmacfg);
 
   qspi_dma_sample(priv, DMA_AFTER_SETUP);
 
@@ -1533,7 +1551,7 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
                  QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
                                                    CCR_FMODE_INDRD);
 
-  /* Start the DMA */
+  /* Start the MDMA */
 
   priv->result = -EBUSY;
   stm32_dmastart(priv->dmach, qspi_dma_callback, priv, false);
@@ -1608,12 +1626,12 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
 
   qspi_dma_sampledone(priv);
 
-  /* Make sure that the DMA is stopped (it will be stopped automatically
+  /* Make sure that the MDMA is stopped (it will be stopped automatically
    * on normal transfers, but not necessarily when the transfer terminates
    * on an error condition).
    */
 
-  stm32_dmastop(priv->dmach);
+   stm32_dmastop(priv->dmach);
 
   regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
   regval &= ~QSPI_CR_DMAEN;
@@ -1623,7 +1641,7 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
 
   if (priv->result)
     {
-      spierr("ERROR: DMA failed with result: %d\n", priv->result);
+      spierr("ERROR: MDMA failed with result: %d\n", priv->result);
     }
 
   return priv->result;
@@ -1854,7 +1872,7 @@ static uint32_t qspi_setfrequency(struct qspi_dev_s *dev, uint32_t frequency)
       return 0;
     }
 
-  spiinfo("frequency=%d\n", frequency);
+  spiinfo("frequency=%lu\n", (unsigned long)frequency);
   DEBUGASSERT(priv);
 
   /* Wait till BUSY flag reset */
@@ -1908,14 +1926,14 @@ static uint32_t qspi_setfrequency(struct qspi_dev_s *dev, uint32_t frequency)
   /* Calculate the new actual frequency */
 
   actual = QSPI_CLK_FREQUENCY / prescaler;
-  spiinfo("prescaler=%d actual=%d\n", prescaler, actual);
+  spiinfo("prescaler=%lu actual=%lu\n", (unsigned long)prescaler, (unsigned long)actual);
 
   /* Save the frequency setting */
 
   priv->frequency = frequency;
   priv->actual    = actual;
 
-  spiinfo("Frequency %d->%d\n", frequency, actual);
+  spiinfo("Frequency %lu->%lu\n", (unsigned long)frequency, (unsigned long)actual);
   return actual;
 }
 
@@ -1986,7 +2004,7 @@ static void qspi_setmode(struct qspi_dev_s *dev, enum qspi_mode_e mode)
         }
 
       qspi_putreg(priv, regval, STM32_QUADSPI_DCR_OFFSET);
-      spiinfo("DCR=%08x\n", regval);
+      spiinfo("DCR=%08lx\n", (unsigned long)regval);
 
       /* Save the mode so that subsequent re-configurations will be faster */
 
@@ -2632,14 +2650,17 @@ struct qspi_dev_s *stm32h7_qspi_initialize(int intf)
       nxsem_init(&priv->exclsem, 0, 1);
 
 #ifdef CONFIG_STM32H7_QSPI_DMA
-      /* Pre-allocate DMA channels. */
+      /* Pre-allocate MDMA channels for STM32H7. */
 
       if (priv->candma)
         {
+          /* Initialize MDMA if not already done */
+          // NOT EXIST stm32_mdma_initialize();
+
           priv->dmach = stm32_dmachannel(DMACHAN_QUADSPI);
           if (!priv->dmach)
             {
-              spierr("ERROR: Failed to allocate the DMA channel\n");
+              spierr("ERROR: Failed to allocate the MDMA channel\n");
               priv->candma = false;
             }
         }

@@ -67,7 +67,7 @@ extern "C"
  ****************************************************************************/
 
 /****************************************************************************
- * Name: stm32l4_qspi_initialize
+ * Name: stm32h7_qspi_initialize
  *
  * Description:
  *   Initialize the selected QSPI port in master mode
@@ -84,7 +84,7 @@ struct qspi_dev_s;
 struct qspi_dev_s *stm32h7_qspi_initialize(int intf);
 
 /****************************************************************************
- * Name: stm32l4_qspi_enter_memorymapped
+ * Name: stm32h7_qspi_enter_memorymapped
  *
  * Description:
  *   Put the QSPI device into memory mapped mode
@@ -104,7 +104,7 @@ void stm32h7_qspi_enter_memorymapped(struct qspi_dev_s *dev,
                                      uint32_t lpto);
 
 /****************************************************************************
- * Name: stm32l4_qspi_exit_memorymapped
+ * Name: stm32h7_qspi_exit_memorymapped
  *
  * Description:
  *   Take the QSPI device out of memory mapped mode

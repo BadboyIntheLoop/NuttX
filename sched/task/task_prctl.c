@@ -31,6 +31,7 @@
 #include <debug.h>
 
 #include <nuttx/sched.h>
+#include <nuttx/itm/itm.h>
 
 #include "sched/sched.h"
 #include "task/task.h"
@@ -128,6 +129,7 @@ int prctl(int option, ...)
 
               strncpy(tcb->name, name, CONFIG_TASK_NAME_SIZE);
               tcb->name[CONFIG_TASK_NAME_SIZE] = '\0';
+              EMDBG_LOG_TASK_START(tcb);
             }
           else
             {

@@ -1831,7 +1831,7 @@ choice
 	default STM32H7_QSPI_DMA
 	---help---
 		You can choose between using polling, interrupts, or DMA to transfer data
-		over the QSPI interface.
+		over the QSPI interface. Note that, QSPI on stm32h7 use MDMA
 
 config STM32H7_QSPI_POLLING
 	bool "Polling"

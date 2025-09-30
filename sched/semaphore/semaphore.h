@@ -29,6 +29,7 @@
 #include <nuttx/compiler.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/sched.h>
+#include <nuttx/itm/itm.h>
 
 #include <stdint.h>
 #include <stdbool.h>

@@ -29,6 +29,7 @@
 #include <errno.h>
 
 #include <nuttx/semaphore.h>
+#include <nuttx/itm/itm.h>
 
 /****************************************************************************
  * Public Functions
@@ -72,6 +73,7 @@ int nxsem_init(FAR sem_t *sem, int pshared, unsigned int value)
       /* Initialize the semaphore count */
 
       sem->semcount         = (int16_t)value;
+      EMDBG_LOG_SEMAPHORE_INIT(sem);
 
       /* Initialize to support priority inheritance */
 

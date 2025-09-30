@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include <queue.h>
 #include <assert.h>
+#include <nuttx/itm/itm.h>
 
 #include "irq/irq.h"
 #include "sched/sched.h"
@@ -108,6 +109,7 @@ bool nxsched_add_readytorun(FAR struct tcb_s *btcb)
       ret = false;
     }
 
+  if (!ret) EMDBG_LOG_TASK_RUNNABLE(btcb);
   return ret;
 }
 #endif /* !CONFIG_SMP */

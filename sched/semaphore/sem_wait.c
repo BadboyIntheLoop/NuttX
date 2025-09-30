@@ -97,6 +97,7 @@ int nxsem_wait(FAR sem_t *sem)
           /* It is, let the task take the semaphore. */
 
           sem->semcount--;
+          EMDBG_LOG_SEMAPHORE_DECR(sem);
           nxsem_add_holder(sem);
           rtcb->waitsem = NULL;
           ret = OK;
@@ -117,6 +118,7 @@ int nxsem_wait(FAR sem_t *sem)
           /* Handle the POSIX semaphore (but don't set the owner yet) */
 
           sem->semcount--;
+          EMDBG_LOG_SEMAPHORE_DECR(sem);
 
           /* Save the waited on semaphore in the TCB */
 

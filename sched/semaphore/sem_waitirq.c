@@ -96,6 +96,7 @@ void nxsem_wait_irq(FAR struct tcb_s *wtcb, int errcode)
        */
 
       sem->semcount++;
+      EMDBG_LOG_SEMAPHORE_INCR(sem);
 
       /* Indicate that the semaphore wait is over. */
 

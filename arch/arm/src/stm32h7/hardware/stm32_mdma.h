@@ -89,22 +89,22 @@
 #define STM32_MDMA_C15IFCR_OFFSET     STM32_MDMA_CXIFCR_OFFSET(15)
 
 #define STM32_MDMA_CXESR_OFFSET(x)    (0x0048+0x040*(x)) /* MDMA channel x error status register */
-#define STM32_MDMA_C0ESR_OFFSET       STM32_MDMA_CXESR_OFFSET0)
-#define STM32_MDMA_C1ESR_OFFSET       STM32_MDMA_CXESR_OFFSET1)
-#define STM32_MDMA_C2ESR_OFFSET       STM32_MDMA_CXESR_OFFSET2)
-#define STM32_MDMA_C3ESR_OFFSET       STM32_MDMA_CXESR_OFFSET3)
-#define STM32_MDMA_C4ESR_OFFSET       STM32_MDMA_CXESR_OFFSET4)
-#define STM32_MDMA_C5ESR_OFFSET       STM32_MDMA_CXESR_OFFSET5)
-#define STM32_MDMA_C6ESR_OFFSET       STM32_MDMA_CXESR_OFFSET6)
-#define STM32_MDMA_C7ESR_OFFSET       STM32_MDMA_CXESR_OFFSET7)
-#define STM32_MDMA_C8ESR_OFFSET       STM32_MDMA_CXESR_OFFSET8)
-#define STM32_MDMA_C9ESR_OFFSET       STM32_MDMA_CXESR_OFFSET9)
-#define STM32_MDMA_C10ESR_OFFSET      STM32_MDMA_CXESR_OFFSET10)
-#define STM32_MDMA_C11ESR_OFFSET      STM32_MDMA_CXESR_OFFSET11)
-#define STM32_MDMA_C12ESR_OFFSET      STM32_MDMA_CXESR_OFFSET12)
-#define STM32_MDMA_C13ESR_OFFSET      STM32_MDMA_CXESR_OFFSET13)
-#define STM32_MDMA_C14ESR_OFFSET      STM32_MDMA_CXESR_OFFSET14)
-#define STM32_MDMA_C15ESR_OFFSET      STM32_MDMA_CXESR_OFFSET15)
+#define STM32_MDMA_C0ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(0)
+#define STM32_MDMA_C1ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(1)
+#define STM32_MDMA_C2ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(2)
+#define STM32_MDMA_C3ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(3)
+#define STM32_MDMA_C4ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(4)
+#define STM32_MDMA_C5ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(5)
+#define STM32_MDMA_C6ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(6)
+#define STM32_MDMA_C7ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(7)
+#define STM32_MDMA_C8ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(8)
+#define STM32_MDMA_C9ESR_OFFSET       STM32_MDMA_CXESR_OFFSET(9)
+#define STM32_MDMA_C10ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(10)
+#define STM32_MDMA_C11ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(11)
+#define STM32_MDMA_C12ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(12)
+#define STM32_MDMA_C13ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(13)
+#define STM32_MDMA_C14ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(14)
+#define STM32_MDMA_C15ESR_OFFSET      STM32_MDMA_CXESR_OFFSET(15)
 
 #define STM32_MDMA_CXCR_OFFSET(x)     (0x004C+0x040*(x)) /* MDMA channel x control register */
 #define STM32_MDMA_C0CR_OFFSET        STM32_MDMA_CXCR_OFFSET(0)
@@ -499,11 +499,10 @@
  */
 
 #define MDMA_INT_TEIF             (1 << 0) /* Bit 0: Channel X transfer error flag */
-#define BDMA_INT_CTCIF            (1 << 1) /* Bit 1: Channel X transfer complete flag */
-#define BDMA_INT_BRTIF            (1 << 2) /* Bit 2: Channel X block repeat transfer complete flag */
-#define BDMA_INT_BTIF             (1 << 3) /* Bit 3: Channel X block transfer complete flag */
-#define BDMA_INT_TCIF             (1 << 4) /* Bit 4: Channel X buffer transfer complete interrupt flag */
-#define BDMA_INT_CRQA             (1 << 5) /* Bit 5: Channel X request active flag */
+#define MDMA_INT_CTCIF            (1 << 1) /* Bit 1: Channel X transfer complete flag */
+#define MDMA_INT_BRTIF            (1 << 2) /* Bit 2: Channel X block repeat transfer complete flag */
+#define MDMA_INT_BTIF             (1 << 3) /* Bit 3: Channel X block transfer complete flag */
+#define MDMA_INT_TCIF             (1 << 4) /* Bit 4: Channel X buffer transfer complete interrupt flag */
 
 /* MDMA channel x error status register */
 

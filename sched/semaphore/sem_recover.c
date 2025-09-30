@@ -98,6 +98,7 @@ void nxsem_recover(FAR struct tcb_s *tcb)
        */
 
       sem->semcount++;
+      EMDBG_LOG_SEMAPHORE_INCR(sem);
 
       /* Clear the semaphore to assure that it is not reused.  But leave the
        * state as TSTATE_WAIT_SEM.  This is necessary because this is a

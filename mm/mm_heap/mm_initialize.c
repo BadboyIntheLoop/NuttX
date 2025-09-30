@@ -29,6 +29,7 @@
 #include <debug.h>
 
 #include <nuttx/mm/mm.h>
+#include <nuttx/itm/itm.h>
 
 #include "mm_heap/mm.h"
 #include "kasan/kasan.h"
@@ -152,6 +153,7 @@ void mm_addregion(FAR struct mm_heap_s *heap, FAR void *heapstart,
   mm_addfreechunk(heap, node);
 
   mm_givesemaphore(heap);
+  EMDBG_LOG_HEAP_ADDREGION(heapbase, heapend - heapbase);
 }
 
 /****************************************************************************

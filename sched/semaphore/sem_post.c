@@ -111,6 +111,7 @@ int nxsem_post(FAR sem_t *sem)
 
       nxsem_release_holder(sem);
       sem->semcount++;
+      EMDBG_LOG_SEMAPHORE_INCR(sem);
 
 #ifdef CONFIG_PRIORITY_INHERITANCE
       /* Don't let any unblocked tasks run until we complete any priority

@@ -34,6 +34,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <arch/stm32h7/chip.h>
+#include <nuttx/itm/itm.h>
 
 #include "arm_internal.h"
 #include "sched/sched.h"
@@ -137,6 +138,7 @@ struct stm32_dmach_s
   uint32_t       base;      /* DMA register channel base address */
   dma_callback_t callback;  /* Callback invoked when the DMA completes */
   void          *arg;       /* Argument passed to callback function */
+  stm32_dmacfg_t cfg;
 };
 
 typedef struct stm32_dmach_s *DMA_CHANNEL;
@@ -919,11 +921,67 @@ static void stm32_gdma_limits_get(uint8_t controller, uint8_t *first,
 
 static void stm32_mdma_disable(DMA_CHANNEL dmachan)
 {
-  uint8_t     controller = dmachan->ctrl;
+  uint32_t regval;
+  uint32_t timeout;
+  uint8_t  chan;
 
-  DEBUGASSERT(controller == MDMA);
+  DEBUGASSERT(dmachan != NULL);
+  DEBUGASSERT(dmachan->ctrl == MDMA);
 
-#warning stm32_mdma_disable
+  chan = dmachan->chan;
+  DEBUGASSERT(chan < MDMA_NCHAN);
+
+  dmainfo("Disabling MDMA channel %d\n", chan);
+  /* Get current Channel Control Register (CCR) value */
+
+  regval = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+
+  /* Disable all MDMA channel interrupts by clearing the interrupt enable bits:
+  * - TEIE: Transfer Error Interrupt Enable (bit 1)
+  * - CTCIE: Channel Transfer Complete Interrupt Enable (bit 2)
+  * - BRTIE: Block Repeat Transfer Interrupt Enable (bit 3)
+  * - BTIE: Block Transfer Interrupt Enable (bit 4)
+  * - TCIE: Buffer Transfer Complete Interrupt Enable (bit 5)
+  *
+  * Note: These are bit positions, so we use (1 << bit_number)
+  */
+
+  regval &= ~((1 << MDMA_CCR_TEIE)  |
+              (1 << MDMA_CCR_CTCIE) |
+              (1 << MDMA_CCR_BRTIE) |
+              (1 << MDMA_CCR_BTIE)  |
+              (1 << MDMA_CCR_TCIE));
+
+  /* Disable the MDMA channel by clearing the EN bit (bit 0).
+  * According to RM0433 Section 15.4.9:
+  * "To disable a channel, the EN bit must be cleared. Once the EN bit
+  * is cleared, a new channel configuration is possible."
+  */
+
+  regval &= ~(1 << MDMA_CCR_EN);
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, regval);
+
+  /* Clear all pending interrupt flags by writing to the
+  * Channel Interrupt Flag Clear Register (CIFCR).
+  * According to RM0433 Section 15.4.3, to clear flags we write 1 to:
+  * - CTEIF (bit 0): Clear Transfer Error Interrupt Flag
+  * - CCTCIF (bit 1): Clear Channel Transfer Complete Interrupt Flag
+  * - CBRTIF (bit 2): Clear Block Repeat Transfer Interrupt Flag
+  * - CBTIF (bit 3): Clear Block Transfer Interrupt Flag
+  * - CTCIF (bit 4): Clear Buffer Transfer Complete Interrupt Flag
+  *
+  * Note: Based on the header file, it appears the interrupt flag definitions
+  * have a naming issue. We'll use the bit positions directly.
+  */
+
+  regval = (1 << 0) |  /* CTEIF - Clear Transfer Error Flag */
+  (1 << 1) |  /* CCTCIF - Clear Channel Transfer Complete Flag */
+  (1 << 2) |  /* CBRTIF - Clear Block Repeat Transfer Flag */
+  (1 << 3) |  /* CBTIF - Clear Block Transfer Flag */
+  (1 << 4);   /* CTCIF - Clear Buffer Transfer Complete Flag */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, regval);
+  EMDBG_LOG_DMA_STOP(dmachan);
 }
 
 /****************************************************************************
@@ -936,7 +994,31 @@ static void stm32_mdma_disable(DMA_CHANNEL dmachan)
 
 static int stm32_mdma_interrupt(int irq, void *context, void *arg)
 {
-#warning stm32_mdma_interrupt
+  DMA_CHANNEL dmachan     = NULL;
+  uint32_t    status      = 0;
+  uint32_t    scrstatus   = 0;
+  uint8_t     stream      = irq - STM32_IRQ_MDMA;
+  uint8_t     controller  = MDMA;
+
+  /* Get the channel structure from the stream and controller numbers */
+  dmachan = stdm32_dma_channel_get(stream, controller);
+
+  /* Get the interrupt status for this stream */
+  status = dmachan_getreg(dmachan, STM32_MDMACH_CISR_OFFSET) >> dmachan->shift;
+
+  // Clear all interrupt flags
+  scrstatus = status & ((1 << MDMA_INT_TEIF)  |
+                        (1 << MDMA_INT_CTCIF) |
+                        (1 << MDMA_INT_BRTIF) |
+                        (1 << MDMA_INT_BTIF)  |
+                        (1 << MDMA_INT_TCIF));
+  dmabase_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, (status << dmachan->shift));
+
+  if(dmachan->callback){
+    dmachan->callback(dmachan, scrstatus, status);
+  }
+
+  return OK;
 }
 
 /****************************************************************************
@@ -949,12 +1031,114 @@ static int stm32_mdma_interrupt(int irq, void *context, void *arg)
 
 static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
 {
-  DMA_CHANNEL dmachan    = (DMA_CHANNEL)handle;
-  uint8_t     controller = dmachan->ctrl;
+  uint32_t    timeout;
+  DMA_CHANNEL dmachan = (DMA_CHANNEL)handle;
+  uint32_t    regval = 0;
+  uint32_t    ccr = cfg->cfg1;    /* MDMA Channel Control Register */
+  uint32_t    ctcr = cfg->cfg2;   /* MDMA Channel Transfer Config Register */
+  uint8_t     chan;
 
-  DEBUGASSERT(controller == MDMA);
+  DEBUGASSERT(handle != NULL);
+  DEBUGASSERT(dmachan->ctrl == MDMA);
 
-#warning stm32_mdma_setup not implemented
+  chan = dmachan->chan;
+  DEBUGASSERT(chan < MDMA_NCHAN);
+
+  dmainfo("paddr: %08" PRIx32 " maddr: %08" PRIx32 " ndata: %" PRIu32 " "
+          "ccr: %08" PRIx32 " ctcr: %08" PRIx32 "\n",
+          cfg->paddr, cfg->maddr, cfg->ndata, ccr, ctcr);
+  EMDBG_LOG_DMA_CONFIGURE(dmachan, cfg);
+
+#ifdef CONFIG_STM32H7_DMACAPABLE
+  DEBUGASSERT(stm32_mdma_capable(cfg));
+#endif
+
+  /* If the channel is enabled, disable it by resetting the EN bit in the
+   * MDMA Channel Control Register (CCR), then read this bit to confirm
+   * that there is no ongoing channel operation. Writing this bit to 0 is
+   * not immediately effective since it is actually written to 0 once all
+   * the current transfers have finished. When the EN bit is read as 0,
+   * this means that the channel is ready to be configured.
+   */
+
+  if ((dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) & (1 << MDMA_CCR_EN)) != 0)
+    {
+      /* Attempt to disable the MDMA channel and wait up to 100 us for it
+       * to stop.
+       */
+
+      dmachan_modifyreg32(dmachan, STM32_MDMACH_CCR_OFFSET, (1 << MDMA_CCR_EN), 0);
+      timeout = 100;
+      while (timeout != 0 &&
+             (dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
+              (1 << MDMA_CCR_EN)) != 0)
+        {
+          up_udelay(1);
+          timeout--;
+        }
+
+      DEBUGASSERT(timeout != 0 &&
+                  (dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
+                   (1 << MDMA_CCR_EN)) == 0);
+    }
+
+  /* Clear all pending interrupt flags from any previous transfer
+   * by writing to the Channel Interrupt Flag Clear Register (CIFCR).
+   */
+
+  regval = (1 << 0) |  /* CTEIF - Clear Transfer Error Flag */
+           (1 << 1) |  /* CCTCIF - Clear Channel Transfer Complete Flag */
+           (1 << 2) |  /* CBRTIF - Clear Block Repeat Transfer Flag */
+           (1 << 3) |  /* CBTIF - Clear Block Transfer Flag */
+           (1 << 4);   /* CTCIF - Clear Buffer Transfer Complete Flag */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, regval);
+
+  /* Set the source address in the MDMA Channel Source Address
+   * Register (CSAR). For MDMA, this can be memory or peripheral.
+   */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CSAR_OFFSET, cfg->paddr);
+
+  /* Set the destination address in the MDMA Channel Destination Address
+   * Register (CDAR). For MDMA, this can be memory or peripheral.
+   */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CDAR_OFFSET, cfg->maddr);
+
+  /* Configure the total number of data items to be transferred in the
+   * MDMA Channel Block Number of Data to Transfer Register (CBNDTR).
+   * After each transfer, this value will be decremented.
+   */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET, cfg->ndata & MDMA_CBNDTR_BNDT_MASK);
+
+  /* Configure the Channel Transfer Configuration Register (CTCR)
+   * This includes:
+   * - Source/destination data sizes
+   * - Source/destination increment modes
+   * - Burst transfer configurations
+   * - Buffer transfer length
+   * - Trigger mode
+   * - Other transfer parameters
+   */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
+
+  /* Configure the Channel Control Register (CCR)
+   * This includes:
+   * - Priority level
+   * - Endianness exchange settings
+   * - Software request mode
+   * Note: Interrupt enables and channel enable will be set in stm32_mdma_start
+   */
+
+  regval = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+  regval &= ~(MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
+              (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ));
+  regval |= (ccr & (MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
+                    (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ)));
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, regval);
 }
 
 /****************************************************************************
@@ -967,12 +1151,117 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
 static void stm32_mdma_start(DMA_HANDLE handle, dma_callback_t callback,
                              void *arg, bool half)
 {
-  DMA_CHANNEL dmachan    = (DMA_CHANNEL)handle;
-  uint8_t     controller = dmachan->ctrl;
+  DMA_CHANNEL dmachan = (DMA_CHANNEL)handle;
+  uint32_t ccr = 0;
+  uint32_t ctcr = 0;
+  uint8_t chan;
 
-  DEBUGASSERT(controller == MDMA);
+  DEBUGASSERT(handle != NULL);
+  DEBUGASSERT(dmachan->ctrl == MDMA);
 
-#warning stm32_mdma_start not implemented
+  chan = dmachan->chan;
+  DEBUGASSERT(chan < MDMA_NCHAN);
+
+  EMDBG_LOG_DMA_START(dmachan);
+
+  /* Save the callback info. This will be invoked when the DMA completes */
+
+  dmachan->callback = callback;
+  dmachan->arg      = arg;
+
+  /* Read the current Channel Control Register (CCR) and
+   * Channel Transfer Configuration Register (CTCR)
+   */
+
+  ccr = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+  ctcr = dmachan_getreg(dmachan, STM32_MDMACH_CTCR_OFFSET);
+
+  /* Enable the MDMA channel by setting the EN bit */
+
+  ccr |= (1 << MDMA_CCR_EN);
+
+  /* Configure interrupt enables based on transfer mode.
+   * For MDMA, we have different interrupt types:
+   * - TEIE: Transfer Error Interrupt Enable
+   * - CTCIE: Channel Transfer Complete Interrupt Enable
+   * - BRTIE: Block Repeat Transfer Interrupt Enable
+   * - BTIE: Block Transfer Interrupt Enable
+   * - TCIE: Buffer Transfer Complete Interrupt Enable
+   *
+   * The interrupt strategy depends on the trigger mode in CTCR and
+   * whether we want half-transfer notifications.
+   */
+
+  /* Always enable transfer error interrupt */
+  ccr |= (1 << MDMA_CCR_TEIE);
+
+  /* Check the trigger mode to determine appropriate interrupt enables */
+  uint32_t trigger_mode = (ctcr & MDMA_CTCR_TRGM_MASK) >> MDMA_CTCR_TRGM_SHIFT;
+
+  switch (trigger_mode)
+    {
+      case 0: /* Buffer level trigger mode */
+        /* Enable Buffer Transfer Complete interrupt for primary completion,
+         * and optionally Channel Transfer Complete for final completion
+         */
+        if (half)
+          {
+            ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
+          }
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        break;
+
+      case 1: /* Block level trigger mode */
+        /* Enable Block Transfer interrupt for block completions,
+         * and Channel Transfer Complete for final completion
+         */
+        if (half)
+          {
+            ccr |= (1 << MDMA_CCR_BTIE);   /* Block transfer complete */
+          }
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        break;
+
+      case 2: /* Repeated block level trigger mode */
+        /* Enable Block Repeat Transfer interrupt for repeated block completions,
+         * and Channel Transfer Complete for final completion
+         */
+        if (half)
+          {
+            ccr |= (1 << MDMA_CCR_BRTIE);  /* Block repeat transfer complete */
+          }
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        break;
+
+      case 3: /* Entire data transfer trigger mode */
+      default:
+        /* For single transfer mode, enable Channel Transfer Complete */
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        if (half)
+          {
+            /* In this mode, we can enable buffer transfer complete
+             * to get intermediate notifications if buffer size < total size
+             */
+            ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
+          }
+        break;
+    }
+
+  /* Write back the updated Channel Control Register to start the transfer */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
+
+  /* For software-triggered transfers, we may need to trigger it manually.
+   * Check if Software Request Mode (SWRM) is enabled in CTCR
+   */
+
+  if (ctcr & (1 << MDMA_CTCR_SWRM))
+    {
+      /* Trigger the transfer by setting the Software Request (SWRQ) bit */
+      dmachan_modifyreg32(dmachan, STM32_MDMACH_CCR_OFFSET, 0, (1 << MDMA_CCR_SWRQ));
+    }
+
+  stm32_dmadump(handle, "MDMA after start");
 }
 
 /****************************************************************************
@@ -1003,16 +1292,323 @@ static size_t stm32_mdma_residual(DMA_HANDLE handle)
 #ifdef CONFIG_STM32H7_DMACAPABLE
 static bool stm32_mdma_capable(stm32_dmacfg_t *cfg)
 {
-  uint32_t transfer_size;
+  uint32_t transfer_size_src;
+  uint32_t transfer_size_dst;
+  uint32_t burst_length_src;
+  uint32_t burst_length_dst;
   uint32_t mend;
+  uint32_t pend;
   uint32_t ccr  = cfg->cfg1;
   uint32_t ctcr = cfg->cfg2;
 
-  dmainfo("0x%08" PRIx32 "/%" PRIu32 " 0x%08" PRIx32 " 0x%08" PRIx32 "\n",
-          cfg->maddr, cfg->ndata, ccr, ctcr);
+  dmainfo("0x%08" PRIx32 "/%" PRIx32 " 0x%08" PRIx32 " ccr:0x%08" PRIx32 " ctcr:0x%08" PRIx32 "\n",
+          cfg->maddr, cfg->paddr, cfg->ndata, ccr, ctcr);
 
-#warning stm32_mdma_capable not implemented
+  /* Verify that the source and destination data sizes are valid.
+   * MDMA supports 8, 16, 32, and 64-bit transfers.
+   */
 
+  switch (ctcr & MDMA_CTCR_SSIZE_MASK)
+    {
+      case MDMA_CTCR_SSIZE_8BITS:
+        {
+          transfer_size_src = 1;
+          break;
+        }
+      case MDMA_CTCR_SSIZE_16BITS:
+        {
+          transfer_size_src = 2;
+          break;
+        }
+      case MDMA_CTCR_SSIZE_32BITS:
+        {
+          transfer_size_src = 4;
+          break;
+        }
+      case MDMA_CTCR_SSIZE_64BITS:
+        {
+          transfer_size_src = 8;
+          break;
+        }
+      default:
+        {
+          dmainfo("stm32_mdma_capable: bad source transfer size in CTCR\n");
+          return false;
+        }
+    }
+
+  switch (ctcr & MDMA_CTCR_DSIZE_MASK)
+    {
+      case MDMA_CTCR_DSIZE_8BITS:
+        {
+          transfer_size_dst = 1;
+          break;
+        }
+      case MDMA_CTCR_DSIZE_16BITS:
+        {
+          transfer_size_dst = 2;
+          break;
+        }
+      case MDMA_CTCR_DSIZE_32BITS:
+        {
+          transfer_size_dst = 4;
+          break;
+        }
+      case MDMA_CTCR_DSIZE_64BITS:
+        {
+          transfer_size_dst = 8;
+          break;
+        }
+      default:
+        {
+          dmainfo("stm32_mdma_capable: bad destination transfer size in CTCR\n");
+          return false;
+        }
+    }
+
+  /* Verify that addresses are aligned to their respective transfer sizes.
+   * Source address (paddr) must be aligned to source transfer size.
+   * Destination address (maddr) must be aligned to destination transfer size.
+   */
+
+  if ((cfg->paddr & (transfer_size_src - 1)) != 0)
+    {
+      dmainfo("stm32_mdma_capable: source address unaligned\n");
+      return false;
+    }
+
+  if ((cfg->maddr & (transfer_size_dst - 1)) != 0)
+    {
+      dmainfo("stm32_mdma_capable: destination address unaligned\n");
+      return false;
+    }
+
+  /* Calculate end addresses for range checking.
+   * For MDMA, the block size is in bytes regardless of transfer size.
+   */
+
+  pend = cfg->paddr + cfg->ndata - 1;
+  mend = cfg->maddr + cfg->ndata - 1;
+
+  /* Verify that burst transfers are valid.
+   * MDMA supports burst sizes of 1, 2, 4, 8, 16, 32, 64, 128 transfers.
+   */
+
+  switch (ctcr & MDMA_CTCR_SBURST_MASK)
+    {
+      case MDMA_CTCR_SBURST_1:
+        burst_length_src = transfer_size_src;
+        break;
+      case MDMA_CTCR_SBURST_2:
+        burst_length_src = transfer_size_src << 1;
+        break;
+      case MDMA_CTCR_SBURST_4:
+        burst_length_src = transfer_size_src << 2;
+        break;
+      case MDMA_CTCR_SBURST_8:
+        burst_length_src = transfer_size_src << 3;
+        break;
+      case MDMA_CTCR_SBURST_16:
+        burst_length_src = transfer_size_src << 4;
+        break;
+      case MDMA_CTCR_SBURST_32:
+        burst_length_src = transfer_size_src << 5;
+        break;
+      case MDMA_CTCR_SBURST_64:
+        burst_length_src = transfer_size_src << 6;
+        break;
+      case MDMA_CTCR_SBURST_128:
+        burst_length_src = transfer_size_src << 7;
+        break;
+      default:
+        {
+          dmainfo("stm32_mdma_capable: bad source burst size in CTCR\n");
+          return false;
+        }
+    }
+
+  switch (ctcr & MDMA_CTCR_DBURST_MASK)
+    {
+      case MDMA_CTCR_DBURST_1:
+        burst_length_dst = transfer_size_dst;
+        break;
+      case MDMA_CTCR_DBURST_2:
+        burst_length_dst = transfer_size_dst << 1;
+        break;
+      case MDMA_CTCR_DBURST_4:
+        burst_length_dst = transfer_size_dst << 2;
+        break;
+      case MDMA_CTCR_DBURST_8:
+        burst_length_dst = transfer_size_dst << 3;
+        break;
+      case MDMA_CTCR_DBURST_16:
+        burst_length_dst = transfer_size_dst << 4;
+        break;
+      case MDMA_CTCR_DBURST_32:
+        burst_length_dst = transfer_size_dst << 5;
+        break;
+      case MDMA_CTCR_DBURST_64:
+        burst_length_dst = transfer_size_dst << 6;
+        break;
+      case MDMA_CTCR_DBURST_128:
+        burst_length_dst = transfer_size_dst << 7;
+        break;
+      default:
+        {
+          dmainfo("stm32_mdma_capable: bad destination burst size in CTCR\n");
+          return false;
+        }
+    }
+
+  /* Verify burst alignment (addresses should be aligned to burst size)
+   * This helps prevent crossing 1KB boundaries which could cause issues.
+   */
+
+  if ((cfg->paddr & (burst_length_src - 1)) != 0)
+    {
+      dmainfo("stm32_mdma_capable: source address not aligned to burst\n");
+      return false;
+    }
+
+  if ((cfg->maddr & (burst_length_dst - 1)) != 0)
+    {
+      dmainfo("stm32_mdma_capable: destination address not aligned to burst\n");
+      return false;
+    }
+
+#if defined(CONFIG_ARMV7M_DCACHE) && \
+    !defined(CONFIG_ARMV7M_DCACHE_WRITETHROUGH)
+  /* Buffer alignment is required for DMA transfers with dcache in buffered
+   * mode (not write-through) because a) arch_invalidate_dcache could lose
+   * buffered writes and b) arch_flush_dcache could corrupt adjacent memory
+   * if the addresses are not on ARMV7M_DCACHE_LINESIZE boundaries.
+   */
+
+  if ((cfg->maddr & (ARMV7M_DCACHE_LINESIZE - 1)) != 0 ||
+      ((mend + 1) & (ARMV7M_DCACHE_LINESIZE - 1)) != 0)
+    {
+      dmainfo("stm32_mdma_capable: dcache unaligned "
+              "maddr:0x%08" PRIx32 " mend:0x%08" PRIx32 "\n",
+              cfg->maddr, mend);
+#if !defined(CONFIG_STM32H7_DMACAPABLE_ASSUME_CACHE_ALIGNED)
+      return false;
+#endif
+    }
+
+  if ((cfg->paddr & (ARMV7M_DCACHE_LINESIZE - 1)) != 0 ||
+      ((pend + 1) & (ARMV7M_DCACHE_LINESIZE - 1)) != 0)
+    {
+      dmainfo("stm32_mdma_capable: dcache unaligned "
+              "paddr:0x%08" PRIx32 " pend:0x%08" PRIx32 "\n",
+              cfg->paddr, pend);
+#if !defined(CONFIG_STM32H7_DMACAPABLE_ASSUME_CACHE_ALIGNED)
+      return false;
+#endif
+    }
+#endif
+
+  /* Verify that transfers don't cross memory region boundaries.
+   * This is important for maintaining coherency and performance.
+   */
+
+  if ((cfg->maddr & STM32_REGION_MASK) != (mend & STM32_REGION_MASK))
+    {
+      dmainfo("stm32_mdma_capable: memory transfer crosses region boundary\n");
+      return false;
+    }
+
+  if ((cfg->paddr & STM32_REGION_MASK) != (pend & STM32_REGION_MASK))
+    {
+      dmainfo("stm32_mdma_capable: peripheral transfer crosses region boundary\n");
+      return false;
+    }
+
+  /* Verify that the destination memory region supports DMA.
+   * MDMA has broader memory access than BDMA and SDMA - it can access
+   * all domains (D1, D2, D3) and most memory types.
+   */
+
+  switch (cfg->maddr & STM32_REGION_MASK)
+    {
+      case STM32_AXISRAM_BASE:     /* AXI SRAM */
+      case STM32_SRAM_BASE:        /* SRAM1, SRAM2, SRAM3, SRAM4, DTCM */
+      case STM32_FMC_BANK1:        /* NOR/PSRAM/SRAM */
+      case STM32_FMC_BANK2:        /* SDRAM */
+      case STM32_FMC_BANK3:        /* NAND FLASH */
+      case STM32_FMC_BANK4:        /* QUADSPI */
+      case STM32_FMC_BANK5:        /* FMC SDRAM Bank 1 */
+      case STM32_FMC_BANK6:        /* FMC SDRAM Bank 2 */
+        {
+          /* All these regions are supported by MDMA */
+          break;
+        }
+
+      case STM32_CODE_BASE:
+        {
+          /* Code region - MDMA can access but typically read-only */
+          /* Allow access to ITCM and Flash regions */
+          break;
+        }
+
+      default:
+        {
+          /* Everything else may not support DMA efficiently */
+          dmainfo("stm32_mdma_capable: destination in unknown/unsupported region\n");
+          return false;
+        }
+    }
+
+  /* Verify that the source address is valid.
+   * MDMA can transfer from any domain but some regions have restrictions.
+   */
+
+  switch (cfg->paddr & STM32_REGION_MASK)
+    {
+      case STM32_AXISRAM_BASE:     /* AXI SRAM */
+      case STM32_SRAM_BASE:        /* SRAM1, SRAM2, SRAM3, SRAM4, DTCM */
+      case STM32_FMC_BANK1:        /* NOR/PSRAM/SRAM */
+      case STM32_FMC_BANK2:        /* SDRAM */
+      case STM32_FMC_BANK3:        /* NAND FLASH */
+      case STM32_FMC_BANK4:        /* QUADSPI */
+      case STM32_FMC_BANK5:        /* FMC SDRAM Bank 1 */
+      case STM32_FMC_BANK6:        /* FMC SDRAM Bank 2 */
+      case STM32_CODE_BASE:        /* Flash and ITCM */
+        {
+          /* All these regions are supported as source by MDMA */
+          break;
+        }
+
+      case STM32_PERIPH_BASE:      /* Peripheral regions D1, D2, D3 */
+        {
+          /* MDMA can access all peripheral domains */
+          break;
+        }
+
+      default:
+        {
+          dmainfo("stm32_mdma_capable: source in unknown/unsupported region\n");
+          return false;
+        }
+    }
+
+  /* Verify data size constraints.
+   * MDMA block size is limited to 16-bit field (65535 bytes max).
+   */
+
+  if (cfg->ndata > MDMA_CBNDTR_BNDT_MASK)
+    {
+      dmainfo("stm32_mdma_capable: transfer size too large (max %d bytes)\n",
+              MDMA_CBNDTR_BNDT_MASK);
+      return false;
+    }
+
+  if (cfg->ndata == 0)
+    {
+      dmainfo("stm32_mdma_capable: zero transfer size\n");
+      return false;
+    }
+
+  dmainfo("transfer OK\n");
   return true;
 }
 #endif
@@ -1110,6 +1706,7 @@ static void stm32_sdma_disable(DMA_CHANNEL dmachan)
     }
 
   dmabase_putreg(dmachan, regoffset, (DMA_STREAM_MASK << dmachan->shift));
+  EMDBG_LOG_DMA_STOP(dmachan);
 }
 
 /****************************************************************************
@@ -1196,6 +1793,7 @@ static int stm32_sdma_interrupt(int irq, void *context, void *arg)
     }
 
   dmabase_putreg(dmachan, regoffset, (status << dmachan->shift));
+  EMDBG_LOG_DMA_STOP(dmachan);
 
   /* Invoke the callback */
 
@@ -1229,6 +1827,7 @@ static void stm32_sdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   dmainfo("paddr: %08" PRIx32 " maddr: %08" PRIx32 " ndata: %" PRIu32 " "
           "scr: %08" PRIx32 "\n",
           cfg->paddr, cfg->maddr, cfg->ndata, cfg->cfg1);
+  EMDBG_LOG_DMA_CONFIGURE(dmachan, cfg);
 
 #ifdef CONFIG_STM32H7_DMACAPABLE
   DEBUGASSERT(stm32_sdma_capable(cfg));
@@ -1406,6 +2005,7 @@ static void stm32_sdma_start(DMA_HANDLE handle, dma_callback_t callback,
 
   DEBUGASSERT(handle != NULL);
   DEBUGASSERT(dmachan->ctrl == DMA1 || dmachan->ctrl == DMA2);
+  EMDBG_LOG_DMA_START(dmachan);
 
   /* Save the callback info.  This will be invoked when the DMA completes */
 
@@ -1758,6 +2358,7 @@ static void stm32_bdma_disable(DMA_CHANNEL dmachan)
 
   dmabase_putreg(dmachan, STM32_BDMA_IFCR_OFFSET,
                    (BDMA_CHAN_MASK << dmachan->shift));
+  EMDBG_LOG_DMA_STOP(dmachan);
 }
 
 /****************************************************************************
@@ -1787,6 +2388,7 @@ static int stm32_bdma_interrupt(int irq, void *context, void *arg)
 
   dmabase_putreg(dmachan, STM32_BDMA_IFCR_OFFSET,
                  (status << dmachan->shift));
+  EMDBG_LOG_DMA_STOP(dmachan);
 
   /* Invoke the callback */
 
@@ -1854,6 +2456,7 @@ static void stm32_bdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   dmainfo("paddr: %08" PRIx32 " maddr: %08" PRIx32 " ndata: %" PRIu32 " "
           "scr: %08" PRIx32 "\n",
           cfg->paddr, cfg->maddr, cfg->ndata, cfg->cfg1);
+  EMDBG_LOG_DMA_CONFIGURE(dmachan, cfg);
 
 #ifdef CONFIG_STM32H7_DMACAPABLE
   DEBUGASSERT(stm32_bdma_capable(cfg));
@@ -1975,6 +2578,7 @@ static void stm32_bdma_start(DMA_HANDLE handle, dma_callback_t callback,
 
   DEBUGASSERT(handle != NULL);
   DEBUGASSERT(dmachan->ctrl == BDMA);
+  EMDBG_LOG_DMA_START(dmachan);
 
   /* Save the callback info.  This will be invoked when the DMA completes */
 

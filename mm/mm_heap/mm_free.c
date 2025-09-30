@@ -29,6 +29,7 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/mm/mm.h>
+#include <nuttx/itm/itm.h>
 
 #include "mm_heap/mm.h"
 #include "kasan/kasan.h"
@@ -94,6 +95,7 @@ void mm_free(FAR struct mm_heap_s *heap, FAR void *mem)
       mm_add_delaylist(heap, mem);
       return;
     }
+  EMDBG_LOG_HEAP_FREE(mem);
 
   kasan_poison(mem, mm_malloc_size(mem));
 

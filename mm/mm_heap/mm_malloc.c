@@ -32,6 +32,7 @@
 #include <nuttx/arch.h>
 #include <nuttx/mm/mm.h>
 #include <nuttx/sched.h>
+#include <nuttx/itm/itm.h>
 
 #include "mm_heap/mm.h"
 #include "kasan/kasan.h"
@@ -117,6 +118,7 @@ FAR void *mm_malloc(FAR struct mm_heap_s *heap, size_t size)
 
   if (size < 1)
     {
+      EMDBG_LOG_HEAP_MALLOC_RESULT(0);
       return NULL;
     }
 
@@ -125,10 +127,12 @@ FAR void *mm_malloc(FAR struct mm_heap_s *heap, size_t size)
    */
 
   alignsize = MM_ALIGN_UP(size + SIZEOF_MM_ALLOCNODE);
+  EMDBG_LOG_HEAP_MALLOC(size);
   if (alignsize < size)
     {
       /* There must have been an integer overflow */
 
+      EMDBG_LOG_HEAP_MALLOC_RESULT(0);
       return NULL;
     }
 
@@ -234,6 +238,7 @@ FAR void *mm_malloc(FAR struct mm_heap_s *heap, size_t size)
 
   DEBUGASSERT(ret == NULL || mm_heapmember(heap, ret));
   mm_givesemaphore(heap);
+  EMDBG_LOG_HEAP_MALLOC_RESULT(ret);
 
   if (ret)
     {
