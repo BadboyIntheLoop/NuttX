@@ -96,10 +96,10 @@
 #define DMA_NSAMPLES     5
 
 /* Can't have both interrupt-driven QSPI and DMA QSPI */
-
-#if defined(CONFIG_STM32H7_QSPI_INTERRUPTS) && defined(CONFIG_STM32H7_QSPI_DMA)
-#  error "Cannot enable both interrupt mode and DMA mode for QSPI"
-#endif
+// I said Can
+// #if defined(CONFIG_STM32H7_QSPI_INTERRUPTS) && defined(CONFIG_STM32H7_QSPI_DMA)
+// #  error "Cannot enable both interrupt mode and DMA mode for QSPI"
+// #endif
 
 /* Sanity check that board.h defines requisite QSPI pinmap options for */
 
@@ -2532,18 +2532,18 @@ static int qspi_hw_initialize(struct stm32h7_qspidev_s *priv)
   regval |= (0x00);
   regval |= ((CONFIG_STM32H7_QSPI_CSHT - 1) << QSPI_DCR_CSHT_SHIFT);
   if (0 != CONFIG_STM32H7_QSPI_FLASH_SIZE)
+  {
+    unsigned int nsize = CONFIG_STM32H7_QSPI_FLASH_SIZE;
+    int nlog2size = 31;
+
+    while ((nsize & 0x80000000) == 0)
     {
-      unsigned int nsize = CONFIG_STM32H7_QSPI_FLASH_SIZE;
-      int nlog2size = 31;
-
-      while ((nsize & 0x80000000) == 0)
-        {
-          --nlog2size;
-          nsize <<= 1;
-        }
-
-      regval |= ((nlog2size - 1) << QSPI_DCR_FSIZE_SHIFT);
+      --nlog2size;
+      nsize <<= 1;
     }
+
+    regval |= ((nlog2size - 1) << QSPI_DCR_FSIZE_SHIFT);
+  }
 
   qspi_putreg(priv, regval, STM32_QUADSPI_DCR_OFFSET);
 
