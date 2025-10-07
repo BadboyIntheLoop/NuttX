@@ -89,9 +89,7 @@ ifeq ($(CONFIG_STM32H7_PWR),y)
 CHIP_CSRCS += stm32_pwr.c
 endif
 
-ifeq ($(CONFIG_STM32H7_MDMA),y)
-CHIP_CSRCS += stm32_mdma.c
-endif
+# MDMA functionality is integrated into stm32_dma.c
 
 ifeq ($(CONFIG_STM32H7_QUADSPI),y)
 CHIP_CSRCS += stm32_qspi.c

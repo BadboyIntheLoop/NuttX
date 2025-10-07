@@ -95,11 +95,9 @@
 #define DMA_END_TRANSFER 4
 #define DMA_NSAMPLES     5
 
-/* Can't have both interrupt-driven QSPI and DMA QSPI */
-// I said Can
-// #if defined(CONFIG_STM32H7_QSPI_INTERRUPTS) && defined(CONFIG_STM32H7_QSPI_DMA)
-// #  error "Cannot enable both interrupt mode and DMA mode for QSPI"
-// #endif
+#if defined(CONFIG_STM32H7_QSPI_INTERRUPTS) && defined(CONFIG_STM32H7_QSPI_DMA)
+#  error "Cannot enable both interrupt mode and DMA mode for QSPI"
+#endif
 
 /* Sanity check that board.h defines requisite QSPI pinmap options for */
 
@@ -210,11 +208,10 @@ struct stm32h7_qspidev_s
 
 #ifdef CONFIG_STM32H7_QSPI_INTERRUPTS
   xcpt_t handler;               /* Interrupt handler */
-  uint8_t irq;                  /* Interrupt number */
   sem_t op_sem;                 /* Block until complete */
   struct qspi_xctnspec_s *xctn; /* context of transaction in progress */
 #endif
-
+  uint8_t irq;                  /* Interrupt number */
 #ifdef CONFIG_STM32H7_QSPI_DMA
   bool candma;                  /* DMA is supported */
   sem_t dmawait;                /* Used to wait for DMA completion */
@@ -308,7 +305,8 @@ static void     qspi_dumpgpioconfig(const char *msg);
 
 #ifdef CONFIG_STM32H7_QSPI_INTERRUPTS
 static int     qspi0_interrupt(int irq, void *context, void *arg);
-
+#else
+static int     qspi_interrupt(int irq, void *context, void *arg); // Note: this is intterupt for MDMA coherence
 #endif
 
 /* DMA support */
@@ -378,8 +376,8 @@ static struct stm32h7_qspidev_s g_qspi0dev =
   .base              = STM32_QUADSPI_BASE,
 #ifdef CONFIG_STM32H7_QSPI_INTERRUPTS
   .handler           = qspi0_interrupt,
-  .irq               = STM32_IRQ_QUADSPI,
 #endif
+  .irq               = STM32_IRQ_QUADSPI, // Interrupt still be used when run with MDMA
   .intf              = 0,
 #ifdef CONFIG_STM32H7_QSPI_DMA
   .candma            = true,
@@ -2169,7 +2167,7 @@ static int qspi_command(struct qspi_dev_s *dev,
 
   /* Wait for the interrupt routine to finish it's magic */
 
-  nxsem_wait(&priv->op_sem);
+  // nxsem_wait(&priv->op_sem);
   MEMORY_SYNC();
 
   /* Convey the result */
@@ -2327,7 +2325,7 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
   /* Wait for the interrupt routine to finish it's magic */
 
-  nxsem_wait(&priv->op_sem);
+  // nxsem_wait(&priv->op_sem);
   MEMORY_SYNC();
 
   /* convey the result */
@@ -2534,7 +2532,7 @@ static int qspi_hw_initialize(struct stm32h7_qspidev_s *priv)
   if (0 != CONFIG_STM32H7_QSPI_FLASH_SIZE)
   {
     unsigned int nsize = CONFIG_STM32H7_QSPI_FLASH_SIZE;
-    int nlog2size = 31;
+    int nlog2size = 24;
 
     while ((nsize & 0x80000000) == 0)
     {
@@ -2587,6 +2585,7 @@ struct qspi_dev_s *stm32h7_qspi_initialize(int intf)
   uint32_t regval;
   int ret;
 
+  irqstate_t flags = enter_critical_section();
   /* The STM32H7 has only a single QSPI port */
 
   spiinfo("intf: %d\n", intf);
@@ -2713,6 +2712,7 @@ struct qspi_dev_s *stm32h7_qspi_initialize(int intf)
 #endif
     }
 
+  leave_critical_section(flags);
   return &priv->qspi;
 
 errout_with_irq:
@@ -2731,6 +2731,7 @@ errout_with_dmawait:
 #endif
 
   nxsem_destroy(&priv->exclsem);
+  leave_critical_section(flags);
   return NULL;
 }
 

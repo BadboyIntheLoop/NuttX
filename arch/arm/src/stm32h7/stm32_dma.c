@@ -922,7 +922,6 @@ static void stm32_gdma_limits_get(uint8_t controller, uint8_t *first,
 static void stm32_mdma_disable(DMA_CHANNEL dmachan)
 {
   uint32_t regval;
-  uint32_t timeout;
   uint8_t  chan;
 
   DEBUGASSERT(dmachan != NULL);
@@ -1001,7 +1000,7 @@ static int stm32_mdma_interrupt(int irq, void *context, void *arg)
   uint8_t     controller  = MDMA;
 
   /* Get the channel structure from the stream and controller numbers */
-  dmachan = stdm32_dma_channel_get(stream, controller);
+  dmachan = stm32_dma_channel_get(stream, controller);
 
   /* Get the interrupt status for this stream */
   status = dmachan_getreg(dmachan, STM32_MDMACH_CISR_OFFSET) >> dmachan->shift;
@@ -1015,7 +1014,7 @@ static int stm32_mdma_interrupt(int irq, void *context, void *arg)
   dmabase_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, (status << dmachan->shift));
 
   if(dmachan->callback){
-    dmachan->callback(dmachan, scrstatus, status);
+    dmachan->callback(dmachan, scrstatus, dmachan->arg);
   }
 
   return OK;
