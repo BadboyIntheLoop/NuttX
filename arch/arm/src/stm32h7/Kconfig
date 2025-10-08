@@ -1907,7 +1907,7 @@ endchoice
 
 config STM32H7_QSPI_DMATHRESHOLD
 	int "QSPI DMA threshold"
-	default 4
+	default 16
 	depends on STM32H7_QSPI_DMA
 	---help---
 		When QSPI DMA is enabled, small DMA transfers will still be performed
