@@ -514,6 +514,14 @@
 #define MDMA_CESR_ASE             (10)     /* Bit 10: Address/size error */
 #define MDMA_CESR_BSE             (11)     /* Bit 11: Block size error */
 
+/* Additional MDMA CESR bit position definitions */
+#define MDMA_CESR_TEA_Pos         (0U)     /* Transfer Error Address bit position */
+#define MDMA_CESR_TED_Pos         (7U)     /* Transfer Error Direction bit position */
+#define MDMA_CESR_TELD_Pos        (8U)     /* Transfer Error Link Data bit position */
+#define MDMA_CESR_TEMD_Pos        (9U)     /* Transfer Error Mask Data bit position */
+#define MDMA_CESR_ASE_Pos         (10U)    /* Address/Size Error bit position */
+#define MDMA_CESR_BSE_Pos         (11U)    /* Block Size Error bit position */
+
 /* MDMA channel x control register */
 
 #define MDMA_CCR_EN               (0)                      /* Bit 0: Channel enable / flag channel ready */
@@ -532,6 +540,19 @@
 #define MDMA_CCR_HEX              (13)                     /* Bit 13: Half word endianness exchange */
 #define MDMA_CCR_WEX              (14)                     /* Bit 14: Word endianness exchange */
 #define MDMA_CCR_SWRQ             (16)                     /* Bit 16: Software request */
+
+/* Additional MDMA CCR bit position definitions */
+#define MDMA_CCR_EN_Pos           (0U)                     /* Channel enable position */
+#define MDMA_CCR_TEIE_Pos         (1U)                     /* Transfer error interrupt enable position */
+#define MDMA_CCR_CTCIE_Pos        (2U)                     /* Channel Transfer Complete interrupt enable position */
+#define MDMA_CCR_BRTIE_Pos        (3U)                     /* Block Repeat transfer interrupt enable position */
+#define MDMA_CCR_BTIE_Pos         (4U)                     /* Block Transfer interrupt enable position */
+#define MDMA_CCR_TCIE_Pos         (5U)                     /* Buffer Transfer Complete interrupt enable position */
+#define MDMA_CCR_PL_Pos           (6U)                     /* Priority level position */
+#define MDMA_CCR_BEX_Pos          (12U)                    /* Byte Endianness eXchange position */
+#define MDMA_CCR_HEX_Pos          (13U)                    /* Half word Endianness eXchange position */
+#define MDMA_CCR_WEX_Pos          (14U)                    /* Word Endianness eXchange position */
+#define MDMA_CCR_SWRQ_Pos         (16U)                    /* SW ReQuest position */
 
 /* MDMA channel x transfer configuration register */
 
@@ -607,6 +628,22 @@
 #define MDMA_CTCR_SWRM            (30)                          /* Bit 30: Software request mode */
 #define MDMA_CTCR_BWM             (31)                          /* Bit 31: Bufferable write mode */
 
+/* Additional MDMA CTCR bit position definitions */
+#define MDMA_CTCR_SINC_Pos        (0U)                          /* Source increment mode position */
+#define MDMA_CTCR_DINC_Pos        (2U)                          /* Destination increment mode position */
+#define MDMA_CTCR_SSIZE_Pos       (4U)                          /* Source data size position */
+#define MDMA_CTCR_DSIZE_Pos       (6U)                          /* Destination data size position */
+#define MDMA_CTCR_SINCOS_Pos      (8U)                          /* Source increment offset size position */
+#define MDMA_CTCR_DINCOS_Pos      (10U)                         /* Destination increment offset size position */
+#define MDMA_CTCR_SBURST_Pos      (12U)                         /* Source burst transfer configuration position */
+#define MDMA_CTCR_DBURST_Pos      (15U)                         /* Destination burst transfer configuration position */
+#define MDMA_CTCR_TLEN_Pos        (18U)                         /* Buffer transfer length position */
+#define MDMA_CTCR_PKE_Pos         (25U)                         /* Pack enable position */
+#define MDMA_CTCR_PAM_Pos         (26U)                         /* Padding/Alignment Mode position */
+#define MDMA_CTCR_TRGM_Pos        (28U)                         /* Trigger Mode position */
+#define MDMA_CTCR_SWRM_Pos        (30U)                         /* SW Request Mode position */
+#define MDMA_CTCR_BWM_Pos         (31U)                         /* Bufferable Write Mode position */
+
 /* MDMA channel x block number of data register */
 
 #define MDMA_CBNDTR_BNDT_SHIFT    (0) /* Bits 0-16: Block number of data bytes to transfer */
@@ -616,6 +653,12 @@
 #define MDMA_CBNDTR_BRC_SHIFT     (20) /* Bits 20-31: Block repeat count */
 #define MDMA_CBNDTR_BRC_MASK      (0xfff << MDMA_CBNDTR_BNDT_SHIFT)
 
+/* Additional MDMA CBNDTR bit position definitions */
+#define MDMA_CBNDTR_BNDT_Pos      (0U)  /* Block number of data bytes position */
+#define MDMA_CBNDTR_BRSUM_Pos     (18U) /* Block repeat source address update mode position */
+#define MDMA_CBNDTR_BRDUM_Pos     (19U) /* Block repeat destination address update mode position */
+#define MDMA_CBNDTR_BRC_Pos       (20U) /* Block repeat count position */
+
 /* MDMA channel x block repeat address update register */
 
 #define MDMA_CBRUR_SUV_SHIFT      (0)  /* Bits 0-15: Source address update value */
@@ -623,11 +666,58 @@
 #define MDMA_CBRUR_DUV_SHIFT      (16) /* Bits 16-31: Destination address update value */
 #define MDMA_CBRUR_DUV_MASK       (0xff << MDMA_CBRUR_DUV_SHIFT)
 
+/* Additional MDMA CBRUR bit position definitions */
+#define MDMA_CBRUR_SUV_Pos        (0U)  /* Source address update value position */
+#define MDMA_CBRUR_DUV_Pos        (16U) /* Destination address update value position */
+
 /* MDMA channel x trigger and bus selection register */
 
-#define MDMA_TSEL_SHIFT           (0)  /* Bits 0-5: Trigger selection */
-#define MDMA_TSEL_MASK            (0x3f << MDMA_TSEL_SHIFT)
-#define MDMA_TSEL_SBUS            (16) /* Bit 16: Source BUS select */
-#define MDMA_TSEL_DBUS            (17) /* Bit 16: Destination BUS select */
+#define MDMA_CTBR_TSEL_SHIFT      (0)  /* Bits 0-7: Trigger selection */
+#define MDMA_CTBR_TSEL_MASK       (0xff << MDMA_CTBR_TSEL_SHIFT)
+#define MDMA_CTBR_TSEL_Pos        (0U)                             /* Trigger selection position */
+#define MDMA_CTBR_SBUS_Pos        (16U)                            /* Source BUS select position */
+#define MDMA_CTBR_SBUS            (16)                             /* Bit 16: Source BUS select */
+#define MDMA_CTBR_DBUS_Pos        (17U)                            /* Destination BUS select position */
+#define MDMA_CTBR_DBUS            (17)                             /* Bit 17: Destination BUS select */
+
+/* Legacy definitions for backward compatibility */
+#define MDMA_TSEL_SHIFT           MDMA_CTBR_TSEL_SHIFT
+#define MDMA_TSEL_MASK            MDMA_CTBR_TSEL_MASK
+#define MDMA_TSEL_SBUS            MDMA_CTBR_SBUS
+#define MDMA_TSEL_DBUS            MDMA_CTBR_DBUS
+
+/* MDMA Source increment mode definitions */
+#define MDMA_SRC_INC_DISABLE      (0x00000000U)                                       /* Source address pointer is fixed */
+#define MDMA_SRC_INC_BYTE         (MDMA_CTCR_SINC_INCR)                               /* Source address pointer is incremented by a BYTE (8 bits) */
+#define MDMA_SRC_INC_HALFWORD     (MDMA_CTCR_SINC_INCR | MDMA_CTCR_SINCOS_16BITS)    /* Source address pointer is incremented by a half Word (16 bits) */
+#define MDMA_SRC_INC_WORD         (MDMA_CTCR_SINC_INCR | MDMA_CTCR_SINCOS_32BITS)    /* Source address pointer is incremented by a Word (32 bits) */
+#define MDMA_SRC_INC_DOUBLEWORD   (MDMA_CTCR_SINC_INCR | MDMA_CTCR_SINCOS_64BITS)    /* Source address pointer is incremented by a double Word (64 bits) */
+#define MDMA_SRC_DEC_BYTE         (MDMA_CTCR_SINC_DECR)                               /* Source address pointer is decremented by a BYTE (8 bits) */
+#define MDMA_SRC_DEC_HALFWORD     (MDMA_CTCR_SINC_DECR | MDMA_CTCR_SINCOS_16BITS)    /* Source address pointer is decremented by a half Word (16 bits) */
+#define MDMA_SRC_DEC_WORD         (MDMA_CTCR_SINC_DECR | MDMA_CTCR_SINCOS_32BITS)    /* Source address pointer is decremented by a Word (32 bits) */
+#define MDMA_SRC_DEC_DOUBLEWORD   (MDMA_CTCR_SINC_DECR | MDMA_CTCR_SINCOS_64BITS)    /* Source address pointer is decremented by a double Word (64 bits) */
+
+/* MDMA Destination increment mode definitions */
+#define MDMA_DEST_INC_DISABLE     (0x00000000U)                                       /* Destination address pointer is fixed */
+#define MDMA_DEST_INC_BYTE        (MDMA_CTCR_DINC_INCR)                               /* Destination address pointer is incremented by a BYTE (8 bits) */
+#define MDMA_DEST_INC_HALFWORD    (MDMA_CTCR_DINC_INCR | MDMA_CTCR_DINCOS_16BITS)    /* Destination address pointer is incremented by a half Word (16 bits) */
+#define MDMA_DEST_INC_WORD        (MDMA_CTCR_DINC_INCR | MDMA_CTCR_DINCOS_32BITS)    /* Destination address pointer is incremented by a Word (32 bits) */
+#define MDMA_DEST_INC_DOUBLEWORD  (MDMA_CTCR_DINC_INCR | MDMA_CTCR_DINCOS_64BITS)    /* Destination address pointer is incremented by a double Word (64 bits) */
+#define MDMA_DEST_DEC_BYTE        (MDMA_CTCR_DINC_DECR)                               /* Destination address pointer is decremented by a BYTE (8 bits) */
+#define MDMA_DEST_DEC_HALFWORD    (MDMA_CTCR_DINC_DECR | MDMA_CTCR_DINCOS_16BITS)    /* Destination address pointer is decremented by a half Word (16 bits) */
+#define MDMA_DEST_DEC_WORD        (MDMA_CTCR_DINC_DECR | MDMA_CTCR_DINCOS_32BITS)    /* Destination address pointer is decremented by a Word (32 bits) */
+#define MDMA_DEST_DEC_DOUBLEWORD  (MDMA_CTCR_DINC_DECR | MDMA_CTCR_DINCOS_64BITS)    /* Destination address pointer is decremented by a double Word (64 bits) */
+
+/* MDMA Source data size definitions */
+#define MDMA_SRC_DATASIZE_BYTE        (0x00000000U)         /* Source data size is Byte */
+#define MDMA_SRC_DATASIZE_HALFWORD    MDMA_CTCR_SSIZE_16BITS /* Source data size is half word */
+#define MDMA_SRC_DATASIZE_WORD        MDMA_CTCR_SSIZE_32BITS /* Source data size is word */
+#define MDMA_SRC_DATASIZE_DOUBLEWORD  MDMA_CTCR_SSIZE_64BITS /* Source data size is double word */
+
+/* MDMA Destination data size definitions */
+#define MDMA_DEST_DATASIZE_BYTE       (0x00000000U)         /* Destination data size is Byte */
+#define MDMA_DEST_DATASIZE_HALFWORD   MDMA_CTCR_DSIZE_16BITS /* Destination data size is half word */
+#define MDMA_DEST_DATASIZE_WORD       MDMA_CTCR_DSIZE_32BITS /* Destination data size is word */
+#define MDMA_DEST_DATASIZE_DOUBLEWORD MDMA_CTCR_DSIZE_64BITS /* Destination data size is double word */
 
 #endif /* __ARCH_ARM_SRC_STM32H7_HARDWARE_STM32_MDMA_H */

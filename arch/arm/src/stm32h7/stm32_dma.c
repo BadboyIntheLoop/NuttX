@@ -536,7 +536,7 @@ static struct stm32_dmach_s g_dmach[DMA_NCHANNELS] =
       .chan     = 14,
       .irq      = STM32_IRQ_MDMA,
       .shift    = 0,
-      .base     = STM32_MDMA_BASE + STM32_MDMA_OFFSET(15),
+      .base     = STM32_MDMA_BASE + STM32_MDMA_OFFSET(14),
     },
 
     {
@@ -1124,6 +1124,39 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
 
   dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
 
+  /* Configure CTBR register based on source and destination addresses */
+  regval = 0;
+  uint32_t addressMask;
+
+  /* Configure Source Bus Selection (SBUS) based on source address */
+  addressMask = cfg->paddr & 0xFF000000U;
+  if ((addressMask == 0x20000000U) || (addressMask == 0x00000000U))
+    {
+      /* AHB bus is used as source (SRAM/DTCM addresses 0x2xxxxxxx or 0x0xxxxxxx) */
+      regval |= (1 << MDMA_CTBR_SBUS);
+    }
+  else
+    {
+      /* AXI bus is used as source (other memory regions) */
+      regval &= ~(1 << MDMA_CTBR_SBUS);
+    }
+
+  /* Configure Destination Bus Selection (DBUS) based on destination address */
+  addressMask = cfg->maddr & 0xFF000000U;
+  if ((addressMask == 0x20000000U) || (addressMask == 0x00000000U))
+    {
+      /* AHB bus is used as destination (SRAM/DTCM addresses 0x2xxxxxxx or 0x0xxxxxxx) */
+      regval |= (1 << MDMA_CTBR_DBUS);
+    }
+  else
+    {
+      /* AXI bus is used as destination (other memory regions) */
+      regval &= ~(1 << MDMA_CTBR_DBUS);
+    }
+
+  /* Write the CTBR register */
+  dmachan_putreg(dmachan, STM32_MDMACH_CTBR_OFFSET, regval);
+
   /* Configure the Channel Control Register (CCR)
    * This includes:
    * - Priority level
@@ -1132,12 +1165,12 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
    * Note: Interrupt enables and channel enable will be set in stm32_mdma_start
    */
 
-  regval = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
-  regval &= ~(MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
-              (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ));
-  regval |= (ccr & (MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
-                    (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ)));
-  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, regval);
+  // regval = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+  // regval &= ~(MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
+  //             (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ));
+  // regval |= (ccr & (MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
+  //                   (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ)));
+  // dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, regval);
 }
 
 /****************************************************************************

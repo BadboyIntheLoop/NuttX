@@ -50,7 +50,7 @@
 
 #include "stm32_gpio.h"
 #include "stm32_dma.h"
-// #include "stm32_mdma.h"
+
 #include "stm32_rcc.h"
 #include "hardware/stm32_qspi.h"
 #include "hardware/stm32_mdma.h"
@@ -110,16 +110,14 @@
 #ifdef CONFIG_STM32H7_QSPI_DMA
 
 #  ifdef DMAMAP_QUADSPI
-
 /* QSPI MDMA Channel selection.  There
  * are multiple MDMA channel options that must be dis-ambiguated in the board.h
  * file. For STM32H7, QSPI uses MDMA instead of regular DMA.
  */
-
 #    define DMACHAN_QUADSPI           DMAMAP_QUADSPI
 #  else
-/* Default MDMA channel for QSPI if not specified in board.h */
-#    define DMACHAN_QUADSPI           DMAP_MDMA_QUADSPI_FT
+/* Default MDMA channel for QSPI here */
+#    define DMACHAN_QUADSPI           MDMA_CHANNEL0
 #  endif
 
 #  if defined(CONFIG_STM32H7_QSPI_DMAPRIORITY_LOW)
@@ -306,7 +304,7 @@ static void     qspi_dumpgpioconfig(const char *msg);
 #ifdef CONFIG_STM32H7_QSPI_INTERRUPTS
 static int     qspi0_interrupt(int irq, void *context, void *arg);
 #else
-static int     qspi_interrupt(int irq, void *context, void *arg); // Note: this is intterupt for MDMA coherence
+// static int     qspi_interrupt(int irq, void *context, void *arg); // Note: this is intterupt for MDMA coherence
 #endif
 
 /* DMA support */
@@ -324,7 +322,7 @@ static void     qspi_dma_sampledone(struct stm32h7_qspidev_s *priv);
 #  endif
 
 #  ifndef CONFIG_STM32H7_QSPI_DMATHRESHOLD
-#    define CONFIG_STM32H7_QSPI_DMATHRESHOLD 4
+#    define CONFIG_STM32H7_QSPI_DMATHRESHOLD 16
 #  endif
 
 #endif
@@ -1531,7 +1529,70 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
   dmacfg.maddr = (uint32_t)meminfo->buffer;
   dmacfg.ndata = meminfo->buflen;
   dmacfg.cfg1  = dmaflags;
-  dmacfg.cfg2  = 0;
+
+  /* Configure CTCR register based on transfer direction and buffer alignment */
+  if (QSPIMEM_ISWRITE(meminfo->flags))
+    {
+      /* WRITE: Memory to QSPI DR register
+       * - Source (memory buffer): increment based on data alignment
+       * - Destination (QSPI DR): fixed address (no increment)
+       */
+
+      uint32_t ctcr_config = MDMA_DEST_INC_DISABLE;  /* QSPI DR register is fixed */
+
+      /* Configure source increment and data size based on buffer alignment */
+      if (IS_ALIGNED(meminfo->buffer) && IS_ALIGNED(meminfo->buflen))
+        {
+          /* Buffer is 32-bit aligned - use word transfers for better performance */
+          ctcr_config |= MDMA_SRC_INC_WORD | MDMA_SRC_DATASIZE_WORD | MDMA_DEST_DATASIZE_WORD;
+        }
+      else if (((uint32_t)meminfo->buffer & 1) == 0 && (meminfo->buflen & 1) == 0)
+        {
+          /* Buffer is 16-bit aligned - use halfword transfers */
+          ctcr_config |= MDMA_SRC_INC_HALFWORD | MDMA_SRC_DATASIZE_HALFWORD | MDMA_DEST_DATASIZE_HALFWORD;
+        }
+      else
+        {
+          /* Buffer is not aligned - use byte transfers */
+          ctcr_config |= MDMA_SRC_INC_BYTE | MDMA_SRC_DATASIZE_BYTE | MDMA_DEST_DATASIZE_BYTE;
+        }
+
+      /* Set trigger mode to buffer transfer (default) and software request mode */
+      // ctcr_config |= MDMA_CTCR_TRGM_BUFFER | (1 << MDMA_CTCR_SWRM);
+
+      dmacfg.cfg2 = ctcr_config;
+    }
+  else
+    {
+      /* READ: QSPI DR register to memory buffer
+       * - Source (QSPI DR): fixed address (no increment)
+       * - Destination (memory buffer): increment based on data alignment
+       */
+
+      uint32_t ctcr_config = MDMA_SRC_INC_DISABLE;  /* QSPI DR register is fixed */
+
+      /* Configure destination increment and data size based on buffer alignment */
+      if (IS_ALIGNED(meminfo->buffer) && IS_ALIGNED(meminfo->buflen))
+        {
+          /* Buffer is 32-bit aligned - use word transfers for better performance */
+          ctcr_config |= MDMA_DEST_INC_WORD | MDMA_SRC_DATASIZE_WORD | MDMA_DEST_DATASIZE_WORD;
+        }
+      else if (((uint32_t)meminfo->buffer & 1) == 0 && (meminfo->buflen & 1) == 0)
+        {
+          /* Buffer is 16-bit aligned - use halfword transfers */
+          ctcr_config |= MDMA_DEST_INC_HALFWORD | MDMA_SRC_DATASIZE_HALFWORD | MDMA_DEST_DATASIZE_HALFWORD;
+        }
+      else
+        {
+          /* Buffer is not aligned - use byte transfers */
+          ctcr_config |= MDMA_DEST_INC_BYTE | MDMA_SRC_DATASIZE_BYTE | MDMA_DEST_DATASIZE_BYTE;
+        }
+
+      /* Set trigger mode to buffer transfer (default) and software request mode */
+      ctcr_config |= MDMA_CTCR_TRGM_BUFFER | (1 << MDMA_CTCR_SWRM);
+
+      dmacfg.cfg2 = ctcr_config;
+    }
 
   stm32_dmasetup(priv->dmach, &dmacfg);
 
@@ -1615,7 +1676,6 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
   while (priv->result == -EBUSY);
 
   /* Wait for Transfer complete, and not busy */
-
   qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
   qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
   MEMORY_SYNC();
@@ -2370,7 +2430,7 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
       /* Wait for Transfer complete, and not busy */
 
-      qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
+      // qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
       qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
 
       MEMORY_SYNC();

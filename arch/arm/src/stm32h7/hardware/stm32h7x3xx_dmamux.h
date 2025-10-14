@@ -179,67 +179,59 @@
 #define DMAMUX2_ADC3           (17)
 /* DMAMUX2 18-32: Reserved */
 
-/* DMAMAP for MDMA */
+/* MDMA Channel definitions */
 
-#define MDMA_STR_DMA1S0     0
-#define MDMA_STR_DMA1S1     1
-#define MDMA_STR_DMA1S2     2
-#define MDMA_STR_DMA1S3     3
-#define MDMA_STR_DMA1S4     4
-#define MDMA_STR_DMA1S5     5
-#define MDMA_STR_DMA1S6     6
-#define MDMA_STR_DMA1S7     7
-#define MDMA_STR_DMA2S0     8
-#define MDMA_STR_DMA2S1     9
-#define MDMA_STR_DMA2S2     10
-#define MDMA_STR_DMA2S3     11
-#define MDMA_STR_DMA2S4     12
-#define MDMA_STR_DMA2S5     13
-#define MDMA_STR_DMA2S6     14
-#define MDMA_STR_DMA2S7     15
-#define MDMA_STR_LTDC       16
-#define MDMA_STR_JPEG_IFT   17
-#define MDMA_STR_JPEG_IFNT  18
-#define MDMA_STR_JPEG_OFT   19
-#define MDMA_STR_JPEG_OFNE  20
-#define MDMA_STR_JPEG_OEC   21
-#define MDMA_STR_QUADSPI_FT 22
-#define MDMA_STR_QUADSPI_TC 23
-#define MDMA_STR_DMA2D_CLUT 24
-#define MDMA_STR_DMA2D_TC   25
-#define MDMA_STR_DMA2D_TW   26
-#define MDMA_STR_SDMMC1     29
+#define MDMA_CHANNEL0       0
+#define MDMA_CHANNEL1       1
+#define MDMA_CHANNEL2       2
+#define MDMA_CHANNEL3       3
+#define MDMA_CHANNEL4       4
+#define MDMA_CHANNEL5       5
+#define MDMA_CHANNEL6       6
+#define MDMA_CHANNEL7       7
+#define MDMA_CHANNEL8       8
+#define MDMA_CHANNEL9       9
+#define MDMA_CHANNEL10      10
+#define MDMA_CHANNEL11      11
+#define MDMA_CHANNEL12      12
+#define MDMA_CHANNEL13      13
+#define MDMA_CHANNEL14      14
+#define MDMA_CHANNEL15      15
 
-/* DMAP for MDMA (no DMAMUX) */
+/* MDMA Request definitions (for compatibility with ST HAL) */
 
-#define DMAP_MDMA_DMA1S0           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S0)
-#define DMAP_MDMA_DMA1S1           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S1)
-#define DMAP_MDMA_DMA1S2           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S2)
-#define DMAP_MDMA_DMA1S3           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S3)
-#define DMAP_MDMA_DMA1S4           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S4)
-#define DMAP_MDMA_DMA1S5           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S5)
-#define DMAP_MDMA_DMA1S6           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S6)
-#define DMAP_MDMA_DMA1S7           DMAMAP_MAP(MDMA, MDMA_STR_DMA1S7)
-#define DMAP_MDMA_DMA2S0           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S0)
-#define DMAP_MDMA_DMA2S1           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S1)
-#define DMAP_MDMA_DMA2S2           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S2)
-#define DMAP_MDMA_DMA2S3           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S3)
-#define DMAP_MDMA_DMA2S4           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S4)
-#define DMAP_MDMA_DMA2S5           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S5)
-#define DMAP_MDMA_DMA2S6           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S6)
-#define DMAP_MDMA_DMA2S7           DMAMAP_MAP(MDMA, MDMA_STR_DMA2S7)
-#define DMAP_MDMA_LTDC             DMAMAP_MAP(MDMA, MDMA_STR_LTDC)
-#define DMAP_MDMA_JPEG_IFT         DMAMAP_MAP(MDMA, MDMA_STR_JPEG_IFT)
-#define DMAP_MDMA_JPEG_IFNT        DMAMAP_MAP(MDMA, MDMA_STR_JPEG_IFNT)
-#define DMAP_MDMA_JPEG_OFT         DMAMAP_MAP(MDMA, MDMA_STR_JPEG_OFT)
-#define DMAP_MDMA_JPEG_OFNE        DMAMAP_MAP(MDMA, MDMA_STR_JPEG_OFNE)
-#define DMAP_MDMA_JPEG_OEC         DMAMAP_MAP(MDMA, MDMA_STR_JPEG_OEC)
-#define DMAP_MDMA_QUADSPI_FT       DMAMAP_MAP(MDMA, MDMA_STR_QUADSPI_FT)
-#define DMAP_MDMA_QUADSPI_TC       DMAMAP_MAP(MDMA, MDMA_STR_QUADSPI_TC)
-#define DMAP_MDMA_DMA2D_CLUT       DMAMAP_MAP(MDMA, MDMA_STR_QUADSPI_CLUT)
-#define DMAP_MDMA_DMA2D_TC         DMAMAP_MAP(MDMA, MDMA_STR_DMA2d_TC)
-#define DMAP_MDMA_DMA2D_TW         DMAMAP_MAP(MDMA, MDMA_STR_DMA2D_TW)
-#define DMAP_MDMA_SDMMC1           DMAMAP_MAP(MDMA, MDMA_STR_SDMMC1)
+#define MDMA_REQUEST_DMA1_STREAM0_TC      ((uint32_t)0x00000000U)  /*!< MDMA HW request is DMA1 Stream 0 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM1_TC      ((uint32_t)0x00000001U)  /*!< MDMA HW request is DMA1 Stream 1 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM2_TC      ((uint32_t)0x00000002U)  /*!< MDMA HW request is DMA1 Stream 2 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM3_TC      ((uint32_t)0x00000003U)  /*!< MDMA HW request is DMA1 Stream 3 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM4_TC      ((uint32_t)0x00000004U)  /*!< MDMA HW request is DMA1 Stream 4 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM5_TC      ((uint32_t)0x00000005U)  /*!< MDMA HW request is DMA1 Stream 5 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM6_TC      ((uint32_t)0x00000006U)  /*!< MDMA HW request is DMA1 Stream 6 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA1_STREAM7_TC      ((uint32_t)0x00000007U)  /*!< MDMA HW request is DMA1 Stream 7 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM0_TC      ((uint32_t)0x00000008U)  /*!< MDMA HW request is DMA2 Stream 0 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM1_TC      ((uint32_t)0x00000009U)  /*!< MDMA HW request is DMA2 Stream 1 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM2_TC      ((uint32_t)0x0000000AU)  /*!< MDMA HW request is DMA2 Stream 2 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM3_TC      ((uint32_t)0x0000000BU)  /*!< MDMA HW request is DMA2 Stream 3 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM4_TC      ((uint32_t)0x0000000CU)  /*!< MDMA HW request is DMA2 Stream 4 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM5_TC      ((uint32_t)0x0000000DU)  /*!< MDMA HW request is DMA2 Stream 5 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM6_TC      ((uint32_t)0x0000000EU)  /*!< MDMA HW request is DMA2 Stream 6 Transfer Complete Flag   */
+#define MDMA_REQUEST_DMA2_STREAM7_TC      ((uint32_t)0x0000000FU)  /*!< MDMA HW request is DMA2 Stream 7 Transfer Complete Flag   */
+#define MDMA_REQUEST_LTDC_LINE_IT         ((uint32_t)0x00000010U)  /*!< MDMA HW request is LTDC Line interrupt Flag               */
+#define MDMA_REQUEST_JPEG_INFIFO_TH       ((uint32_t)0x00000011U)  /*!< MDMA HW request is JPEG Input FIFO threshold Flag         */
+#define MDMA_REQUEST_JPEG_INFIFO_NF       ((uint32_t)0x00000012U)  /*!< MDMA HW request is JPEG Input FIFO not full Flag          */
+#define MDMA_REQUEST_JPEG_OUTFIFO_TH      ((uint32_t)0x00000013U)  /*!< MDMA HW request is JPEG Output FIFO threshold Flag        */
+#define MDMA_REQUEST_JPEG_OUTFIFO_NE      ((uint32_t)0x00000014U)  /*!< MDMA HW request is JPEG Output FIFO not empty Flag        */
+#define MDMA_REQUEST_JPEG_END_CONVERSION  ((uint32_t)0x00000015U)  /*!< MDMA HW request is JPEG End of conversion Flag            */
+#define MDMA_REQUEST_QUADSPI_FIFO_TH      ((uint32_t)0x00000016U)  /*!< MDMA HW request is QSPI FIFO threshold Flag               */
+#define MDMA_REQUEST_QUADSPI_TC           ((uint32_t)0x00000017U)  /*!< MDMA HW request is QSPI Transfer complete Flag            */
+#define MDMA_REQUEST_DMA2D_CLUT_TC        ((uint32_t)0x00000018U)  /*!< MDMA HW request is DMA2D CLUT Transfer Complete Flag      */
+#define MDMA_REQUEST_DMA2D_TC             ((uint32_t)0x00000019U)  /*!< MDMA HW request is DMA2D Transfer Complete Flag           */
+#define MDMA_REQUEST_DMA2D_TW             ((uint32_t)0x0000001AU)  /*!< MDMA HW request is DMA2D Transfer Watermark Flag          */
+#define MDMA_REQUEST_SDMMC1_END_DATA      ((uint32_t)0x0000001DU)  /*!< MDMA HW request is SDMMC1 End of Data Flag                */
+#define MDMA_REQUEST_SDMMC1_DMA_ENDBUFFER ((uint32_t)0x0000001EU)  /*!< MDMA HW request is SDMMC1 Internal DMA buffer End Flag    */
+#define MDMA_REQUEST_SDMMC1_COMMAND_END   ((uint32_t)0x0000001FU)  /*!< MDMA HW request is SDMMC1 Command End Flag                */
+#define MDMA_REQUEST_SW                   ((uint32_t)0x40000000U)  /*!< MDMA SW request                                            */
+
 
 /* DMAMAP for DMA1 and DMA2 (DMAMUX1) */
 
