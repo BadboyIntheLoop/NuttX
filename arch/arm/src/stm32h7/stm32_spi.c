@@ -2530,19 +2530,21 @@ static void spi_bus_initialize(struct stm32_spidev_s *priv)
 
   priv->rxdma = NULL;
   priv->txdma = NULL;
-  if (priv->config != SIMPLEX_TX)
-    {
-      priv->rxdma = stm32_dmachannel(priv->rxch);
-      DEBUGASSERT(priv->rxdma);
-      spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_RXDMAEN);
-    }
+  if(priv->spibase != STM32_SPI5_BASE){
+    if (priv->config != SIMPLEX_TX)
+      {
+        priv->rxdma = stm32_dmachannel(priv->rxch);
+        DEBUGASSERT(priv->rxdma);
+        spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_RXDMAEN);
+      }
 
-  if (priv->config != SIMPLEX_RX)
-    {
-      priv->txdma = stm32_dmachannel(priv->txch);
-      DEBUGASSERT(priv->txdma);
-      spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_TXDMAEN);
-    }
+    if (priv->config != SIMPLEX_RX)
+      {
+        priv->txdma = stm32_dmachannel(priv->txch);
+        DEBUGASSERT(priv->txdma);
+        spi_modifyreg(priv, STM32_SPI_CFG1_OFFSET, 0, SPI_CFG1_TXDMAEN);
+      }
+  }
 #endif
 
   /* Attach the IRQ to the driver */

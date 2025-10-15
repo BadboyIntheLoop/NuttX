@@ -117,7 +117,7 @@
 #    define DMACHAN_QUADSPI           DMAMAP_QUADSPI
 #  else
 /* Default MDMA channel for QSPI here */
-#    define DMACHAN_QUADSPI           MDMA_CHANNEL0
+#    define DMACHAN_QUADSPI           DMAMAP_MDMA_CHAN0
 #  endif
 
 #  if defined(CONFIG_STM32H7_QSPI_DMAPRIORITY_LOW)
