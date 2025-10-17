@@ -1033,8 +1033,8 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   uint32_t    timeout;
   DMA_CHANNEL dmachan = (DMA_CHANNEL)handle;
   uint32_t    regval = 0;
-  uint32_t    ccr = cfg->cfg1;    /* MDMA Channel Control Register */
-  uint32_t    ctcr = cfg->cfg2;   /* MDMA Channel Transfer Config Register */
+  uint32_t    ccr_mask = cfg->cfg1;    /* MDMA Channel Control Register */
+  uint32_t    ctcr_mask = cfg->cfg2;   /* MDMA Channel Transfer Config Register */
   uint8_t     chan;
 
   DEBUGASSERT(handle != NULL);
@@ -1044,12 +1044,12 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   DEBUGASSERT(chan < MDMA_NCHAN);
 
   dmainfo("paddr: %08" PRIx32 " maddr: %08" PRIx32 " ndata: %" PRIu32 " "
-          "ccr: %08" PRIx32 " ctcr: %08" PRIx32 "\n",
-          cfg->paddr, cfg->maddr, cfg->ndata, ccr, ctcr);
+          "ccr_mask: %08" PRIx32 " ctcr_mask: %08" PRIx32 "\n",
+          cfg->paddr, cfg->maddr, cfg->ndata, ccr_mask, ctcr_mask);
   EMDBG_LOG_DMA_CONFIGURE(dmachan, cfg);
 
 #ifdef CONFIG_STM32H7_DMACAPABLE
-  DEBUGASSERT(stm32_mdma_capable(cfg));
+  // DEBUGASSERT(stm32_mdma_capable(cfg));
 #endif
 
   /* If the channel is enabled, disable it by resetting the EN bit in the
@@ -1060,26 +1060,51 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
    * this means that the channel is ready to be configured.
    */
 
+  /* Configure the Channel Control Register (CCR)
+   * This includes:
+   * - Priority level
+   * - Endianness exchange settings
+   * - Software request mode
+   * Note: Interrupt enables and channel enable will be set in stm32_mdma_start
+   */
+
   if ((dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) & (1 << MDMA_CCR_EN)) != 0)
-    {
-      /* Attempt to disable the MDMA channel and wait up to 100 us for it
-       * to stop.
-       */
+  {
+    /* Attempt to disable the MDMA channel and wait up to 100 us for it
+      * to stop.
+      */
 
-      dmachan_modifyreg32(dmachan, STM32_MDMACH_CCR_OFFSET, (1 << MDMA_CCR_EN), 0);
-      timeout = 100;
-      while (timeout != 0 &&
-             (dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
-              (1 << MDMA_CCR_EN)) != 0)
-        {
-          up_udelay(1);
-          timeout--;
-        }
+    dmachan_modifyreg32(dmachan, STM32_MDMACH_CCR_OFFSET, (1 << MDMA_CCR_EN), 0);
+    timeout = 100;
+    while (timeout != 0 &&
+            (dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
+            (1 << MDMA_CCR_EN)) != 0)
+      {
+        up_udelay(1);
+        timeout--;
+      }
 
-      DEBUGASSERT(timeout != 0 &&
-                  (dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
-                   (1 << MDMA_CCR_EN)) == 0);
-    }
+    DEBUGASSERT(timeout != 0 &&
+                (dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET) &
+                  (1 << MDMA_CCR_EN)) == 0);
+  }
+
+  uint32_t ccr = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+  ccr |= ccr_mask;
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
+
+  /* Configure the Channel Transfer Configuration Register (CTCR)
+   * This includes:
+   * - Source/destination data sizes (outside, in qspi_dma_memory)
+   * - Source/destination increment modes (outside, in qspi_dma_memory)
+   * - Burst transfer configurations (SRC/DEST all 0(s))
+   * - Data Alignment: PKE
+   * - Buffer transfer length: 32
+   * - Trigger mode: MDMA_BUFFER_TRANSFER 0x00000000U
+   */
+  uint32_t ctcr = (1 << MDMA_CTCR_PKE_Pos) | ((32 - 1) << MDMA_CTCR_TLEN_Pos);
+  ctcr |= ctcr_mask;
+  dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
 
   /* Clear all pending interrupt flags from any previous transfer
    * by writing to the Channel Interrupt Flag Clear Register (CIFCR).
@@ -1109,20 +1134,13 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
    * MDMA Channel Block Number of Data to Transfer Register (CBNDTR).
    * After each transfer, this value will be decremented.
    */
+  uint32_t cbndtr = dmachan_getreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET);
+  cbndtr = (cbndtr & (~(MDMA_CBNDTR_BNDT_MASK))) | (cfg->ndata & MDMA_CBNDTR_BNDT_MASK);
+  cbndtr = (cbndtr & (~(MDMA_CBNDTR_BRC_MASK))) | (0 << MDMA_CBNDTR_BRC_Pos) & MDMA_CBNDTR_BRC_MASK;
+  dmachan_putreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET, cbndtr);
 
-  dmachan_putreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET, cfg->ndata & MDMA_CBNDTR_BNDT_MASK);
-
-  /* Configure the Channel Transfer Configuration Register (CTCR)
-   * This includes:
-   * - Source/destination data sizes
-   * - Source/destination increment modes
-   * - Burst transfer configurations
-   * - Buffer transfer length
-   * - Trigger mode
-   * - Other transfer parameters
-   */
-
-  dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
+  /* Configure CBRUR Register value : source repeat block offset */
+  dmachan_putreg(dmachan, STM32_MDMACH_CBRUR_OFFSET, (0 & 0x0000FFFFU) | (((0 & 0x0000FFFFU) << 16)));
 
   /* Configure CTBR register based on source and destination addresses */
   regval = 0;
@@ -1156,21 +1174,6 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
 
   /* Write the CTBR register */
   dmachan_putreg(dmachan, STM32_MDMACH_CTBR_OFFSET, regval);
-
-  /* Configure the Channel Control Register (CCR)
-   * This includes:
-   * - Priority level
-   * - Endianness exchange settings
-   * - Software request mode
-   * Note: Interrupt enables and channel enable will be set in stm32_mdma_start
-   */
-
-  // regval = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
-  // regval &= ~(MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
-  //             (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ));
-  // regval |= (ccr & (MDMA_CCR_PL_MASK | (1 << MDMA_CCR_BEX) | (1 << MDMA_CCR_HEX) |
-  //                   (1 << MDMA_CCR_WEX) | (1 << MDMA_CCR_SWRQ)));
-  // dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, regval);
 }
 
 /****************************************************************************
@@ -1224,60 +1227,60 @@ static void stm32_mdma_start(DMA_HANDLE handle, dma_callback_t callback,
    * whether we want half-transfer notifications.
    */
 
-  /* Always enable transfer error interrupt */
-  ccr |= (1 << MDMA_CCR_TEIE);
+  /* Enable transfer error interrupt */
+  // ccr |= (1 << MDMA_CCR_TEIE);
 
   /* Check the trigger mode to determine appropriate interrupt enables */
-  uint32_t trigger_mode = (ctcr & MDMA_CTCR_TRGM_MASK) >> MDMA_CTCR_TRGM_SHIFT;
+  // uint32_t trigger_mode = (ctcr & MDMA_CTCR_TRGM_MASK) >> MDMA_CTCR_TRGM_SHIFT;
 
-  switch (trigger_mode)
-    {
-      case 0: /* Buffer level trigger mode */
-        /* Enable Buffer Transfer Complete interrupt for primary completion,
-         * and optionally Channel Transfer Complete for final completion
-         */
-        if (half)
-          {
-            ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
-          }
-        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-        break;
+  // switch (trigger_mode)
+  //   {
+  //     case 0: /* Buffer level trigger mode */
+  //       /* Enable Buffer Transfer Complete interrupt for primary completion,
+  //        * and optionally Channel Transfer Complete for final completion
+  //        */
+  //       if (half)
+  //         {
+  //           ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
+  //         }
+  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+  //       break;
 
-      case 1: /* Block level trigger mode */
-        /* Enable Block Transfer interrupt for block completions,
-         * and Channel Transfer Complete for final completion
-         */
-        if (half)
-          {
-            ccr |= (1 << MDMA_CCR_BTIE);   /* Block transfer complete */
-          }
-        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-        break;
+  //     case 1: /* Block level trigger mode */
+  //       /* Enable Block Transfer interrupt for block completions,
+  //        * and Channel Transfer Complete for final completion
+  //        */
+  //       if (half)
+  //         {
+  //           ccr |= (1 << MDMA_CCR_BTIE);   /* Block transfer complete */
+  //         }
+  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+  //       break;
 
-      case 2: /* Repeated block level trigger mode */
-        /* Enable Block Repeat Transfer interrupt for repeated block completions,
-         * and Channel Transfer Complete for final completion
-         */
-        if (half)
-          {
-            ccr |= (1 << MDMA_CCR_BRTIE);  /* Block repeat transfer complete */
-          }
-        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-        break;
+  //     case 2: /* Repeated block level trigger mode */
+  //       /* Enable Block Repeat Transfer interrupt for repeated block completions,
+  //        * and Channel Transfer Complete for final completion
+  //        */
+  //       if (half)
+  //         {
+  //           ccr |= (1 << MDMA_CCR_BRTIE);  /* Block repeat transfer complete */
+  //         }
+  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+  //       break;
 
-      case 3: /* Entire data transfer trigger mode */
-      default:
-        /* For single transfer mode, enable Channel Transfer Complete */
-        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-        if (half)
-          {
-            /* In this mode, we can enable buffer transfer complete
-             * to get intermediate notifications if buffer size < total size
-             */
-            ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
-          }
-        break;
-    }
+  //     case 3: /* Entire data transfer trigger mode */
+  //     default:
+  //       /* For single transfer mode, enable Channel Transfer Complete */
+  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+  //       if (half)
+  //         {
+  //           /* In this mode, we can enable buffer transfer complete
+  //            * to get intermediate notifications if buffer size < total size
+  //            */
+  //           ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
+  //         }
+  //       break;
+  //   }
 
   /* Write back the updated Channel Control Register to start the transfer */
 

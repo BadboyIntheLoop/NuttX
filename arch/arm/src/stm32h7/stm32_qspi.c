@@ -954,18 +954,21 @@ static int qspi_setupxctnfrommem(struct qspi_xctnspec_s *xctn,
    * of i,a,d
    */
 
-  if (QSPIMEM_ISDUALIO(meminfo->flags))
-    {
-      xctn->addrmode = CCR_ADMODE_DUAL;
-    }
-  else if (QSPIMEM_ISQUADIO(meminfo->flags))
-    {
-      xctn->addrmode = CCR_ADMODE_QUAD;
-    }
-  else
-    {
-      xctn->addrmode = CCR_ADMODE_SINGLE;
-    }
+  // if (QSPIMEM_ISDUALIO(meminfo->flags))
+  //   {
+  //     xctn->addrmode = CCR_ADMODE_DUAL;
+  //   }
+  // else if (QSPIMEM_ISQUADIO(meminfo->flags))
+  //   {
+  //     xctn->addrmode = CCR_ADMODE_QUAD;
+  //   }
+  // else
+  //   {
+  //     xctn->addrmode = CCR_ADMODE_SINGLE;
+  //   }
+
+  // For now, force addrmode = address_1_line
+  xctn->addrmode = CCR_ADMODE_SINGLE;
 
   if (meminfo->addrlen == 1)
     {
@@ -1501,11 +1504,16 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
   uint32_t regval;
   int ret;
 
+  /* Set up the Communications Configuration Register as per command info */
+
+  qspi_ccrconfig(priv, xctn,
+                 QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
+                                                   CCR_FMODE_INDRD);
   /* Initialize register sampling */
 
   qspi_dma_sampleinit(priv);
 
-  /* Determine MDMA flags and setup the MDMA */
+  /* Determine MDMA flags for MDMA */
 
   if (QSPIMEM_ISWRITE(meminfo->flags))
     {
@@ -1530,7 +1538,7 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
   dmacfg.ndata = meminfo->buflen;
   dmacfg.cfg1  = dmaflags;
 
-  /* Configure CTCR register based on transfer direction and buffer alignment */
+  /* Configure CTCR register based on transfer direction and buffer alignment only */
   if (QSPIMEM_ISWRITE(meminfo->flags))
     {
       /* WRITE: Memory to QSPI DR register
@@ -1538,29 +1546,12 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
        * - Destination (QSPI DR): fixed address (no increment)
        */
 
-      uint32_t ctcr_config = MDMA_DEST_INC_DISABLE;  /* QSPI DR register is fixed */
+      uint32_t ctcr_mask = MDMA_DEST_INC_DISABLE;  /* QSPI DR register is fixed */
 
-      /* Configure source increment and data size based on buffer alignment */
-      if (IS_ALIGNED(meminfo->buffer) && IS_ALIGNED(meminfo->buflen))
-        {
-          /* Buffer is 32-bit aligned - use word transfers for better performance */
-          ctcr_config |= MDMA_SRC_INC_WORD | MDMA_SRC_DATASIZE_WORD | MDMA_DEST_DATASIZE_WORD;
-        }
-      else if (((uint32_t)meminfo->buffer & 1) == 0 && (meminfo->buflen & 1) == 0)
-        {
-          /* Buffer is 16-bit aligned - use halfword transfers */
-          ctcr_config |= MDMA_SRC_INC_HALFWORD | MDMA_SRC_DATASIZE_HALFWORD | MDMA_DEST_DATASIZE_HALFWORD;
-        }
-      else
-        {
-          /* Buffer is not aligned - use byte transfers */
-          ctcr_config |= MDMA_SRC_INC_BYTE | MDMA_SRC_DATASIZE_BYTE | MDMA_DEST_DATASIZE_BYTE;
-        }
+      /* Buffer use byte transfers */
+      ctcr_mask = (ctcr_mask & (~(MDMA_CTCR_SINC_INCR | MDMA_CTCR_SINCOS_64BITS))) | MDMA_SRC_INC_BYTE;
 
-      /* Set trigger mode to buffer transfer (default) and software request mode */
-      // ctcr_config |= MDMA_CTCR_TRGM_BUFFER | (1 << MDMA_CTCR_SWRM);
-
-      dmacfg.cfg2 = ctcr_config;
+      dmacfg.cfg2 = ctcr_mask;
     }
   else
     {
@@ -1569,29 +1560,14 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
        * - Destination (memory buffer): increment based on data alignment
        */
 
-      uint32_t ctcr_config = MDMA_SRC_INC_DISABLE;  /* QSPI DR register is fixed */
+      uint32_t ctcr_mask = MDMA_SRC_INC_DISABLE;
 
-      /* Configure destination increment and data size based on buffer alignment */
-      if (IS_ALIGNED(meminfo->buffer) && IS_ALIGNED(meminfo->buflen))
-        {
-          /* Buffer is 32-bit aligned - use word transfers for better performance */
-          ctcr_config |= MDMA_DEST_INC_WORD | MDMA_SRC_DATASIZE_WORD | MDMA_DEST_DATASIZE_WORD;
-        }
-      else if (((uint32_t)meminfo->buffer & 1) == 0 && (meminfo->buflen & 1) == 0)
-        {
-          /* Buffer is 16-bit aligned - use halfword transfers */
-          ctcr_config |= MDMA_DEST_INC_HALFWORD | MDMA_SRC_DATASIZE_HALFWORD | MDMA_DEST_DATASIZE_HALFWORD;
-        }
-      else
-        {
-          /* Buffer is not aligned - use byte transfers */
-          ctcr_config |= MDMA_DEST_INC_BYTE | MDMA_SRC_DATASIZE_BYTE | MDMA_DEST_DATASIZE_BYTE;
-        }
+      ctcr_mask = (ctcr_mask & (~(MDMA_CTCR_DINC_INCR | MDMA_CTCR_DINCOS_64BITS))) | MDMA_DEST_INC_BYTE;
 
       /* Set trigger mode to buffer transfer (default) and software request mode */
-      ctcr_config |= MDMA_CTCR_TRGM_BUFFER | (1 << MDMA_CTCR_SWRM);
+      // ctcr_config |= MDMA_CTCR_TRGM_BUFFER | (1 << MDMA_CTCR_SWRM);
 
-      dmacfg.cfg2 = ctcr_config;
+      dmacfg.cfg2 = ctcr_mask;
     }
 
   stm32_dmasetup(priv->dmach, &dmacfg);
@@ -1603,12 +1579,6 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
   regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
   regval |= QSPI_CR_DMAEN;
   qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
-
-  /* Set up the Communications Configuration Register as per command info */
-
-  qspi_ccrconfig(priv, xctn,
-                 QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
-                                                   CCR_FMODE_INDRD);
 
   /* Start the MDMA */
 
@@ -2461,7 +2431,7 @@ static int qspi_memory(struct qspi_dev_s *dev,
 
   /* Wait for Transfer complete, and not busy */
 
-  qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
+  // qspi_waitstatusflags(priv, QSPI_SR_TCF, 1);
   qspi_waitstatusflags(priv, QSPI_SR_BUSY, 0);
 
   MEMORY_SYNC();
@@ -2589,19 +2559,21 @@ static int qspi_hw_initialize(struct stm32h7_qspidev_s *priv)
   regval &= ~(QSPI_DCR_CKMODE | QSPI_DCR_CSHT_MASK | QSPI_DCR_FSIZE_MASK);
   regval |= (0x00);
   regval |= ((CONFIG_STM32H7_QSPI_CSHT - 1) << QSPI_DCR_CSHT_SHIFT);
-  if (0 != CONFIG_STM32H7_QSPI_FLASH_SIZE)
-  {
-    unsigned int nsize = CONFIG_STM32H7_QSPI_FLASH_SIZE;
-    int nlog2size = 24;
+  // if (0 != CONFIG_STM32H7_QSPI_FLASH_SIZE)
+  // {
+  //   unsigned int nsize = CONFIG_STM32H7_QSPI_FLASH_SIZE;
+  //   int nlog2size = 31;
 
-    while ((nsize & 0x80000000) == 0)
-    {
-      --nlog2size;
-      nsize <<= 1;
-    }
+  //   while ((nsize & 0x80000000) == 0)
+  //   {
+  //     --nlog2size;
+  //     nsize <<= 1;
+  //   }
 
-    regval |= ((nlog2size - 1) << QSPI_DCR_FSIZE_SHIFT);
-  }
+  //   regval |= ((nlog2size - 1) << QSPI_DCR_FSIZE_SHIFT);
+  // }
+
+  regval |= ((24 - 1) << QSPI_DCR_FSIZE_SHIFT);
 
   qspi_putreg(priv, regval, STM32_QUADSPI_DCR_OFFSET);
 
