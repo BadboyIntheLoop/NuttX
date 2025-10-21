@@ -74,10 +74,9 @@
 
 /* Missing register definitions *********************************************/
 
-/* QSPI_CR_DMAEN bit is reserved on STM32H7 but kept for software compatibility */
-#ifndef QSPI_CR_DMAEN
-#define QSPI_CR_DMAEN              (1 << 2)   /* Bit 2: DMA Enable (reserved, software compatibility) */
-#endif
+/* Note: Bit 2 in QSPI CR register is RESERVED on STM32H7 and must remain 0.
+ * DMA is triggered automatically by MDMA hardware request, not by control bit.
+ */
 
 /* Debug ********************************************************************/
 
@@ -516,13 +515,12 @@ static void qspi_dumpregs(struct stm32h7_qspidev_s *priv, const char *msg)
 
   regval = getreg32(priv->base + STM32_QUADSPI_CR_OFFSET);    /* Control Register */
   spiinfo("CR:%08x\n", regval);
-  spiinfo("  EN:%1d ABORT:%1d DMAEN:%1d TCEN:%1d SSHIFT:%1d\n"
+  spiinfo("  EN:%1d ABORT:%1d TCEN:%1d SSHIFT:%1d\n"
           "  FTHRES: %d\n"
           "  TEIE:%1d TCIE:%1d FTIE:%1d SMIE:%1d TOIE:%1d APMS:%1d PMM:%1d\n"
           "  PRESCALER: %d\n",
           (regval & QSPI_CR_EN) ? 1 : 0,
           (regval & QSPI_CR_ABORT) ? 1 : 0,
-          (regval & QSPI_CR_DMAEN) ? 1 : 0,
           (regval & QSPI_CR_TCEN) ? 1 : 0,
           (regval & QSPI_CR_SSHIFT) ? 1 : 0,
           (regval & QSPI_CR_FTHRES_MASK) >> QSPI_CR_FTHRES_SHIFT,
@@ -940,35 +938,48 @@ static int qspi_setupxctnfrommem(struct qspi_xctnspec_s *xctn,
 
   xctn->issioo = 0;
 
-  /* XXX III options for alt bytes */
+  /* Configure alternate bytes (mode byte) for command 0xEB */
 
-  xctn->altbytesmode = CCR_ABMODE_NONE;
-  xctn->altbytessize = CCR_ABSIZE_8;
-  xctn->altbytes = 0;
+  if (meminfo->cmd == 0xEB)
+    {
+      /* Command 0xEB requires mode byte M7-M0 = 0xFF on quad lines
+       * Setting to 0xFF disables continuous read mode
+       */
+      xctn->altbytesmode = CCR_ABMODE_QUAD;  /* Mode byte on 4 lines */
+      xctn->altbytessize = CCR_ABSIZE_8;     /* 8-bit mode byte */
+      xctn->altbytes = 0xFF;                  /* 0xFF = disable continuous read */
+    }
+  else
+    {
+      xctn->altbytesmode = CCR_ABMODE_NONE;
+      xctn->altbytessize = CCR_ABSIZE_8;
+      xctn->altbytes = 0;
+    }
 
   xctn->dummycycles = meminfo->dummies;
 
   /* Specify the address size as needed */
 
-  /* XXX III there should be a separate flags for single/dual/quad for each
-   * of i,a,d
+  /* Set address mode based on command:
+   * - 0xEB (Fast Read Quad I/O) supports quad address (1-4-4)
+   * - 0x32 (Quad Page Program) requires single address (1-1-4)
+   * - Other commands use single address by default
    */
 
-  // if (QSPIMEM_ISDUALIO(meminfo->flags))
-  //   {
-  //     xctn->addrmode = CCR_ADMODE_DUAL;
-  //   }
-  // else if (QSPIMEM_ISQUADIO(meminfo->flags))
-  //   {
-  //     xctn->addrmode = CCR_ADMODE_QUAD;
-  //   }
-  // else
-  //   {
-  //     xctn->addrmode = CCR_ADMODE_SINGLE;
-  //   }
-
-  // For now, force addrmode = address_1_line
-  xctn->addrmode = CCR_ADMODE_SINGLE;
+  if (QSPIMEM_ISQUADIO(meminfo->flags) && meminfo->cmd == 0xEB)
+    {
+      /* Command 0xEB (Fast Read Quad I/O) supports quad address */
+      xctn->addrmode = CCR_ADMODE_QUAD;
+    }
+  else if (QSPIMEM_ISDUALIO(meminfo->flags))
+    {
+      xctn->addrmode = CCR_ADMODE_DUAL;
+    }
+  else
+    {
+      /* Default: single line address (required for 0x32 write cmd) */
+      xctn->addrmode = CCR_ADMODE_SINGLE;
+    }
 
   if (meminfo->addrlen == 1)
     {
@@ -1574,11 +1585,16 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
 
   qspi_dma_sample(priv, DMA_AFTER_SETUP);
 
-  /* Enable the memory transfer */
+  /* On STM32H7, DMA is triggered automatically by MDMA hardware request
+   * when FIFO threshold is reached. No CR register bit needs to be set.
+   */
 
+  /* Debug: Verify CR register for DMA mode */
   regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
-  regval |= QSPI_CR_DMAEN;
-  qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
+  spiinfo("DMA mode: CR=0x%08" PRIx32 ", buflen=%d, FTHRES=%d\n",
+          regval,
+          (int)meminfo->buflen,
+          (int)((regval >> QSPI_CR_FTHRES_SHIFT) & 0xF));
 
   /* Start the MDMA */
 
@@ -1630,9 +1646,7 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
           if (ret != -EINTR)
             {
               DEBUGPANIC();
-              regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
-              regval &= ~QSPI_CR_DMAEN;
-              qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
+              /* On STM32H7, no CR bit needs to be cleared for DMA */
               return ret;
             }
         }
@@ -1661,9 +1675,7 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
 
    stm32_dmastop(priv->dmach);
 
-  regval = qspi_getreg(priv, STM32_QUADSPI_CR_OFFSET);
-  regval &= ~QSPI_CR_DMAEN;
-  qspi_putreg(priv, regval, STM32_QUADSPI_CR_OFFSET);
+  /* On STM32H7, no CR bit needs to be cleared after DMA */
 
   /* Complain if the DMA fails */
 
@@ -2365,15 +2377,21 @@ static int qspi_memory(struct qspi_dev_s *dev,
 #elif defined(CONFIG_STM32H7_QSPI_DMA)
   /* Can we perform DMA?  Should we perform DMA? */
 
+  spiinfo("DMA check: candma=%d, buflen=%zu, threshold=%d, buf_aligned=%d, len_aligned=%d\n",
+          priv->candma, meminfo->buflen, CONFIG_STM32H7_QSPI_DMATHRESHOLD,
+          IS_ALIGNED((uintptr_t)meminfo->buffer), IS_ALIGNED(meminfo->buflen));
+
   if (priv->candma &&
       meminfo->buflen > CONFIG_STM32H7_QSPI_DMATHRESHOLD &&
       IS_ALIGNED((uintptr_t)meminfo->buffer) &&
       IS_ALIGNED(meminfo->buflen))
     {
+      spiinfo("Using DMA mode for %zu bytes\n", meminfo->buflen);
       ret = qspi_memory_dma(priv, meminfo, &xctn);
     }
   else
     {
+      spiinfo("Using polling mode for %zu bytes\n", meminfo->buflen);
       /* polling mode */
 
       /* Set up the Communications Configuration Register as per command

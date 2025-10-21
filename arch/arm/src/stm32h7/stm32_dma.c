@@ -37,6 +37,7 @@
 #include <nuttx/itm/itm.h>
 
 #include "arm_internal.h"
+#include "barriers.h"
 #include "sched/sched.h"
 #include "stm32_dma.h"
 #include "hardware/stm32_bdma.h"
@@ -1043,6 +1044,7 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   chan = dmachan->chan;
   DEBUGASSERT(chan < MDMA_NCHAN);
 
+  dmainfo("MDMA CH%d base addr: 0x%08" PRIx32 "\n", chan, dmachan->base);
   dmainfo("paddr: %08" PRIx32 " maddr: %08" PRIx32 " ndata: %" PRIu32 " "
           "ccr_mask: %08" PRIx32 " ctcr_mask: %08" PRIx32 "\n",
           cfg->paddr, cfg->maddr, cfg->ndata, ccr_mask, ctcr_mask);
@@ -1089,10 +1091,6 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
                   (1 << MDMA_CCR_EN)) == 0);
   }
 
-  uint32_t ccr = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
-  ccr |= ccr_mask;
-  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
-
   /* Configure the Channel Transfer Configuration Register (CTCR)
    * This includes:
    * - Source/destination data sizes (outside, in qspi_dma_memory)
@@ -1101,10 +1099,21 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
    * - Data Alignment: PKE
    * - Buffer transfer length: 32
    * - Trigger mode: MDMA_BUFFER_TRANSFER 0x00000000U
+   *
+   * CRITICAL: CTCR can ONLY be written when CCR.EN = 0!
+   * Must configure CTCR before writing CCR.
    */
   uint32_t ctcr = (1 << MDMA_CTCR_PKE_Pos) | ((32 - 1) << MDMA_CTCR_TLEN_Pos);
   ctcr |= ctcr_mask;
   dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
+
+  /* Configure the Channel Control Register (CCR)
+   * IMPORTANT: Keep EN=0 during setup. Channel will be enabled in stm32_mdma_start().
+   */
+  uint32_t ccr = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
+  ccr &= ~(1 << MDMA_CCR_EN);  /* Ensure EN bit stays cleared */
+  ccr |= ccr_mask;
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
 
   /* Clear all pending interrupt flags from any previous transfer
    * by writing to the Channel Interrupt Flag Clear Register (CIFCR).
@@ -1174,6 +1183,22 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
 
   /* Write the CTBR register */
   dmachan_putreg(dmachan, STM32_MDMACH_CTBR_OFFSET, regval);
+
+  /* CRITICAL: Ensure all register writes are committed to hardware before
+   * starting DMA. On Cortex-M7 with cache, peripheral register writes can
+   * be buffered and may not reach the peripheral immediately.
+   */
+  ARM_DSB();  /* Data Synchronization Barrier - wait for all writes to complete */
+  ARM_ISB();  /* Instruction Synchronization Barrier - flush pipeline */
+
+  /* Debug: Print MDMA channel configuration */
+  dmainfo("MDMA CH%d configured:\n", chan);
+  dmainfo("  CCR:    0x%08" PRIx32 "\n", dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET));
+  dmainfo("  CTCR:   0x%08" PRIx32 "\n", dmachan_getreg(dmachan, STM32_MDMACH_CTCR_OFFSET));
+  dmainfo("  CSAR:   0x%08" PRIx32 "\n", dmachan_getreg(dmachan, STM32_MDMACH_CSAR_OFFSET));
+  dmainfo("  CDAR:   0x%08" PRIx32 "\n", dmachan_getreg(dmachan, STM32_MDMACH_CDAR_OFFSET));
+  dmainfo("  CBNDTR: 0x%08" PRIx32 "\n", dmachan_getreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET));
+  dmainfo("  CTBR:   0x%08" PRIx32 "\n", dmachan_getreg(dmachan, STM32_MDMACH_CTBR_OFFSET));
 }
 
 /****************************************************************************
@@ -1286,6 +1311,9 @@ static void stm32_mdma_start(DMA_HANDLE handle, dma_callback_t callback,
 
   dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
 
+  /* CRITICAL: Memory barrier to ensure CCR write reaches MDMA before triggering */
+  ARM_DSB();
+
   /* For software-triggered transfers, we may need to trigger it manually.
    * Check if Software Request Mode (SWRM) is enabled in CTCR
    */
@@ -1294,6 +1322,9 @@ static void stm32_mdma_start(DMA_HANDLE handle, dma_callback_t callback,
     {
       /* Trigger the transfer by setting the Software Request (SWRQ) bit */
       dmachan_modifyreg32(dmachan, STM32_MDMACH_CCR_OFFSET, 0, (1 << MDMA_CCR_SWRQ));
+
+      /* CRITICAL: Memory barrier to ensure SWRQ write reaches MDMA */
+      ARM_DSB();
     }
 
   stm32_dmadump(handle, "MDMA after start");
