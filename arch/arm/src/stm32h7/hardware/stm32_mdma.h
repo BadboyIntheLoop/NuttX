@@ -34,7 +34,7 @@
 
 /* Register Offsets *********************************************************/
 
-#define STM32_MDMA_OFFSET(x)          (0x40+0x40*(x))
+#define STM32_MDMA_OFFSET(x)          (0x40*(x))
 #define STM32_MDMA_GISR0_OFFSET       0x0000 /* MDMA global interrupt/status register */
                                              /* 0x0004-0x003C: Reserved */
 
@@ -651,7 +651,7 @@
 #define MDMA_CBNDTR_BRSUM         (18) /* Bit 18: Block repeat source address update mode */
 #define MDMA_CBNDTR_BRDUM         (19) /* Bit 19: Block repeat destination address update mode */
 #define MDMA_CBNDTR_BRC_SHIFT     (20) /* Bits 20-31: Block repeat count */
-#define MDMA_CBNDTR_BRC_MASK      (0xfff << MDMA_CBNDTR_BNDT_SHIFT)
+#define MDMA_CBNDTR_BRC_MASK      (0xfff << MDMA_CBNDTR_BRC_SHIFT)
 
 /* Additional MDMA CBNDTR bit position definitions */
 #define MDMA_CBNDTR_BNDT_Pos      (0U)  /* Block number of data bytes position */

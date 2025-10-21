@@ -1091,7 +1091,19 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
                   (1 << MDMA_CCR_EN)) == 0);
   }
 
-  /* Configure the Channel Transfer Configuration Register (CTCR)
+  /* STEP 1: Clear all pending interrupt flags FIRST (before any configuration)
+   * This is critical per ST reference manual - clear flags before configuring.
+   */
+
+  regval = (1 << 0) |  /* CTEIF - Clear Transfer Error Flag */
+           (1 << 1) |  /* CCTCIF - Clear Channel Transfer Complete Flag */
+           (1 << 2) |  /* CBRTIF - Clear Block Repeat Transfer Flag */
+           (1 << 3) |  /* CBTIF - Clear Block Transfer Flag */
+           (1 << 4);   /* CTCIF - Clear Buffer Transfer Complete Flag */
+
+  dmachan_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, regval);
+
+  /* STEP 2: Configure the Channel Transfer Configuration Register (CTCR)
    * This includes:
    * - Source/destination data sizes (outside, in qspi_dma_memory)
    * - Source/destination increment modes (outside, in qspi_dma_memory)
@@ -1107,7 +1119,7 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   ctcr |= ctcr_mask;
   dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
 
-  /* Configure the Channel Control Register (CCR)
+  /* STEP 3: Configure the Channel Control Register (CCR)
    * IMPORTANT: Keep EN=0 during setup. Channel will be enabled in stm32_mdma_start().
    */
   uint32_t ccr = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
@@ -1115,43 +1127,36 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   ccr |= ccr_mask;
   dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
 
-  /* Clear all pending interrupt flags from any previous transfer
-   * by writing to the Channel Interrupt Flag Clear Register (CIFCR).
+  /* CRITICAL: Ensure CCR write completes before configuring address registers.
+   * Address registers can only be written when CCR.EN = 0.
    */
+  ARM_DSB();
 
-  regval = (1 << 0) |  /* CTEIF - Clear Transfer Error Flag */
-           (1 << 1) |  /* CCTCIF - Clear Channel Transfer Complete Flag */
-           (1 << 2) |  /* CBRTIF - Clear Block Repeat Transfer Flag */
-           (1 << 3) |  /* CBTIF - Clear Block Transfer Flag */
-           (1 << 4);   /* CTCIF - Clear Buffer Transfer Complete Flag */
-
-  dmachan_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, regval);
-
-  /* Set the source address in the MDMA Channel Source Address
+  /* STEP 4: Set the source address in the MDMA Channel Source Address
    * Register (CSAR). For MDMA, this can be memory or peripheral.
    */
 
   dmachan_putreg(dmachan, STM32_MDMACH_CSAR_OFFSET, cfg->paddr);
 
-  /* Set the destination address in the MDMA Channel Destination Address
+  /* STEP 5: Set the destination address in the MDMA Channel Destination Address
    * Register (CDAR). For MDMA, this can be memory or peripheral.
    */
 
   dmachan_putreg(dmachan, STM32_MDMACH_CDAR_OFFSET, cfg->maddr);
 
-  /* Configure the total number of data items to be transferred in the
+  /* STEP 6: Configure the total number of data items to be transferred in the
    * MDMA Channel Block Number of Data to Transfer Register (CBNDTR).
    * After each transfer, this value will be decremented.
    */
   uint32_t cbndtr = dmachan_getreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET);
-  cbndtr = (cbndtr & (~(MDMA_CBNDTR_BNDT_MASK))) | (cfg->ndata & MDMA_CBNDTR_BNDT_MASK);
-  cbndtr = (cbndtr & (~(MDMA_CBNDTR_BRC_MASK))) | (0 << MDMA_CBNDTR_BRC_Pos) & MDMA_CBNDTR_BRC_MASK;
+  cbndtr = (cbndtr & (~MDMA_CBNDTR_BNDT_MASK)) | (cfg->ndata & MDMA_CBNDTR_BNDT_MASK);
+  cbndtr = (cbndtr & (~MDMA_CBNDTR_BRC_MASK)) | ((0 << MDMA_CBNDTR_BRC_Pos) & MDMA_CBNDTR_BRC_MASK);
   dmachan_putreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET, cbndtr);
 
-  /* Configure CBRUR Register value : source repeat block offset */
+  /* STEP 7: Configure CBRUR Register value : source repeat block offset */
   dmachan_putreg(dmachan, STM32_MDMACH_CBRUR_OFFSET, (0 & 0x0000FFFFU) | (((0 & 0x0000FFFFU) << 16)));
 
-  /* Configure CTBR register based on source and destination addresses */
+  /* STEP 8: Configure CTBR register based on source and destination addresses */
   regval = 0;
   uint32_t addressMask;
 
@@ -1181,12 +1186,13 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
       regval &= ~(1 << MDMA_CTBR_DBUS);
     }
 
-  /* Write the CTBR register */
+  /* STEP 9: Write the CTBR register */
   dmachan_putreg(dmachan, STM32_MDMACH_CTBR_OFFSET, regval);
 
-  /* CRITICAL: Ensure all register writes are committed to hardware before
-   * starting DMA. On Cortex-M7 with cache, peripheral register writes can
+  /* STEP 10 (FINAL): Ensure all register writes are committed to hardware.
+   * CRITICAL: On Cortex-M7 with cache, peripheral register writes can
    * be buffered and may not reach the peripheral immediately.
+   * Per ST HAL and reference manual: use memory barriers after configuration.
    */
   ARM_DSB();  /* Data Synchronization Barrier - wait for all writes to complete */
   ARM_ISB();  /* Instruction Synchronization Barrier - flush pipeline */
