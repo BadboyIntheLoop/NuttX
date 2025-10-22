@@ -1006,12 +1006,15 @@ static int stm32_mdma_interrupt(int irq, void *context, void *arg)
   /* Get the interrupt status for this stream */
   status = dmachan_getreg(dmachan, STM32_MDMACH_CISR_OFFSET) >> dmachan->shift;
 
-  // Clear all interrupt flags
-  scrstatus = status & ((1 << MDMA_INT_TEIF)  |
-                        (1 << MDMA_INT_CTCIF) |
-                        (1 << MDMA_INT_BRTIF) |
-                        (1 << MDMA_INT_BTIF)  |
-                        (1 << MDMA_INT_TCIF));
+  /* Clear all interrupt flags
+   * Note: MDMA_INT_* constants are already bit masks (e.g., MDMA_INT_TEIF = (1 << 0))
+   * so we don't need to shift them again.
+   */
+  scrstatus = status & (MDMA_INT_TEIF  |
+                        MDMA_INT_CTCIF |
+                        MDMA_INT_BRTIF |
+                        MDMA_INT_BTIF  |
+                        MDMA_INT_TCIF);
   dmabase_putreg(dmachan, STM32_MDMACH_CIFCR_OFFSET, (status << dmachan->shift));
 
   if(dmachan->callback){
@@ -1114,54 +1117,80 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
    *
    * CRITICAL: CTCR can ONLY be written when CCR.EN = 0!
    * Must configure CTCR before writing CCR.
+   *
+   * IMPORTANT: When using hardware triggers (CTBR.TSEL != 0), SWRM bit must be 0.
+   * SWRM (Software Request Mode) and hardware triggers are mutually exclusive.
    */
   uint32_t ctcr = (1 << MDMA_CTCR_PKE_Pos) | ((32 - 1) << MDMA_CTCR_TLEN_Pos);
   ctcr |= ctcr_mask;
+
+  /* Clear SWRM and BWM bits for hardware-triggered transfers */
+  ctcr &= ~((1 << MDMA_CTCR_SWRM) | (1 << MDMA_CTCR_BWM));
+
   dmachan_putreg(dmachan, STM32_MDMACH_CTCR_OFFSET, ctcr);
 
-  /* STEP 3: Configure the Channel Control Register (CCR)
-   * IMPORTANT: Keep EN=0 during setup. Channel will be enabled in stm32_mdma_start().
+  /* STEP 3: Prepare CCR value but DON'T write it yet
+   * We'll write CCR at the very end after all other registers are configured.
+   *
+   * Per ST HAL (stm32h7xx_hal_mdma.c:1819): During MDMA_Init, CCR should ONLY contain:
+   *   - Priority level (PL bits 6-7)
+   *   - Endianness settings (BEX/HEX/WEX bits 8-10)
+   *   - EN = 0
+   *   - NO interrupt enables (TEIE, CTCIE, etc.) - those are set in start function!
+   *
+   * CRITICAL: Strip interrupt enable bits from ccr_mask to prevent premature interrupts.
    */
-  uint32_t ccr = dmachan_getreg(dmachan, STM32_MDMACH_CCR_OFFSET);
-  ccr &= ~(1 << MDMA_CCR_EN);  /* Ensure EN bit stays cleared */
-  ccr |= ccr_mask;
-  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
+  uint32_t ccr = 0;  /* Start with clean CCR */
 
-  /* CRITICAL: Ensure CCR write completes before configuring address registers.
-   * Address registers can only be written when CCR.EN = 0.
-   */
-  ARM_DSB();
+  /* Extract ONLY priority and endianness from ccr_mask, strip all interrupt enables */
+  const uint32_t init_mask = MDMA_CCR_PL_MASK | (0x7 << 8);  /* PL[6:7] + BEX/HEX/WEX[8:10] */
+  ccr = ccr_mask & init_mask;
+
+  /* DON'T write CCR yet - write it at the end! */
 
   /* STEP 4: Set the source address in the MDMA Channel Source Address
    * Register (CSAR). For MDMA, this can be memory or peripheral.
+   * CRITICAL: CSAR/CDAR/CBNDTR can ONLY be written when CCR.EN = 0!
    */
 
   dmachan_putreg(dmachan, STM32_MDMACH_CSAR_OFFSET, cfg->paddr);
+  ARM_DSB();  /* Ensure write completes */
 
   /* STEP 5: Set the destination address in the MDMA Channel Destination Address
    * Register (CDAR). For MDMA, this can be memory or peripheral.
    */
 
   dmachan_putreg(dmachan, STM32_MDMACH_CDAR_OFFSET, cfg->maddr);
+  ARM_DSB();  /* Ensure write completes */
 
   /* STEP 6: Configure the total number of data items to be transferred in the
    * MDMA Channel Block Number of Data to Transfer Register (CBNDTR).
    * After each transfer, this value will be decremented.
+   * Write complete value directly (don't read-modify-write).
    */
   uint32_t cbndtr = dmachan_getreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET);
   cbndtr = (cbndtr & (~MDMA_CBNDTR_BNDT_MASK)) | (cfg->ndata & MDMA_CBNDTR_BNDT_MASK);
   cbndtr = (cbndtr & (~MDMA_CBNDTR_BRC_MASK)) | ((0 << MDMA_CBNDTR_BRC_Pos) & MDMA_CBNDTR_BRC_MASK);
   dmachan_putreg(dmachan, STM32_MDMACH_CBNDTR_OFFSET, cbndtr);
+  ARM_DSB();  /* Ensure write completes */
 
   /* STEP 7: Configure CBRUR Register value : source repeat block offset */
   dmachan_putreg(dmachan, STM32_MDMACH_CBRUR_OFFSET, (0 & 0x0000FFFFU) | (((0 & 0x0000FFFFU) << 16)));
 
-  /* STEP 8: Configure CTBR register based on source and destination addresses */
-  regval = 0;
-  uint32_t addressMask;
+  /* STEP 8: Configure CTBR register with HW request and bus selection
+   * CTBR contains:
+   * - Bits 0-7: Trigger selection (TSEL) - hardware request source
+   * - Bit 16: Source bus selection (SBUS) - AHB=1 or AXI=0
+   * - Bit 17: Destination bus selection (DBUS) - AHB=1 or AXI=0
+   *
+   * Per ST HAL reference: Set TSEL for HW-triggered transfers.
+   * For QSPI: Use MDMA_REQUEST_QUADSPI_FIFO_TH (0x16)
+   */
 
+  /* Set hardware request for QSPI FIFO threshold trigger */
+  regval = MDMA_REQUEST_QUADSPI_FIFO_TH & MDMA_CTBR_TSEL_MASK;
   /* Configure Source Bus Selection (SBUS) based on source address */
-  addressMask = cfg->paddr & 0xFF000000U;
+  uint32_t addressMask = cfg->paddr & 0xFF000000U;
   if ((addressMask == 0x20000000U) || (addressMask == 0x00000000U))
     {
       /* AHB bus is used as source (SRAM/DTCM addresses 0x2xxxxxxx or 0x0xxxxxxx) */
@@ -1189,7 +1218,15 @@ static void stm32_mdma_setup(DMA_HANDLE handle, stm32_dmacfg_t *cfg)
   /* STEP 9: Write the CTBR register */
   dmachan_putreg(dmachan, STM32_MDMACH_CTBR_OFFSET, regval);
 
-  /* STEP 10 (FINAL): Ensure all register writes are committed to hardware.
+  /* STEP 10: NOW write CCR register with EN=1
+   * Write CCR LAST after all other registers are configured.
+   * This ensures CTCR, CSAR, CDAR, CBNDTR, CTBR are all set before CCR.
+   */
+
+//  ccr |= (1 << MDMA_CCR_EN);  /* Enable channel */
+  dmachan_putreg(dmachan, STM32_MDMACH_CCR_OFFSET, ccr);
+
+  /* STEP 11 (FINAL): Ensure all register writes are committed to hardware.
    * CRITICAL: On Cortex-M7 with cache, peripheral register writes can
    * be buffered and may not reach the peripheral immediately.
    * Per ST HAL and reference manual: use memory barriers after configuration.
@@ -1259,59 +1296,59 @@ static void stm32_mdma_start(DMA_HANDLE handle, dma_callback_t callback,
    */
 
   /* Enable transfer error interrupt */
-  // ccr |= (1 << MDMA_CCR_TEIE);
+  ccr |= (1 << MDMA_CCR_TEIE);
 
   /* Check the trigger mode to determine appropriate interrupt enables */
-  // uint32_t trigger_mode = (ctcr & MDMA_CTCR_TRGM_MASK) >> MDMA_CTCR_TRGM_SHIFT;
+  uint32_t trigger_mode = (ctcr & MDMA_CTCR_TRGM_MASK) >> MDMA_CTCR_TRGM_SHIFT;
 
-  // switch (trigger_mode)
-  //   {
-  //     case 0: /* Buffer level trigger mode */
-  //       /* Enable Buffer Transfer Complete interrupt for primary completion,
-  //        * and optionally Channel Transfer Complete for final completion
-  //        */
-  //       if (half)
-  //         {
-  //           ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
-  //         }
-  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-  //       break;
+  switch (trigger_mode)
+    {
+      case 0: /* Buffer level trigger mode (QSPI uses this) */
+        /* Enable Buffer Transfer Complete interrupt for primary completion,
+         * and optionally Channel Transfer Complete for final completion
+         */
+        if (half)
+          {
+            ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
+          }
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        break;
 
-  //     case 1: /* Block level trigger mode */
-  //       /* Enable Block Transfer interrupt for block completions,
-  //        * and Channel Transfer Complete for final completion
-  //        */
-  //       if (half)
-  //         {
-  //           ccr |= (1 << MDMA_CCR_BTIE);   /* Block transfer complete */
-  //         }
-  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-  //       break;
+      case 1: /* Block level trigger mode */
+        /* Enable Block Transfer interrupt for block completions,
+         * and Channel Transfer Complete for final completion
+         */
+        if (half)
+          {
+            ccr |= (1 << MDMA_CCR_BTIE);   /* Block transfer complete */
+          }
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        break;
 
-  //     case 2: /* Repeated block level trigger mode */
-  //       /* Enable Block Repeat Transfer interrupt for repeated block completions,
-  //        * and Channel Transfer Complete for final completion
-  //        */
-  //       if (half)
-  //         {
-  //           ccr |= (1 << MDMA_CCR_BRTIE);  /* Block repeat transfer complete */
-  //         }
-  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-  //       break;
+      case 2: /* Repeated block level trigger mode */
+        /* Enable Block Repeat Transfer interrupt for repeated block completions,
+         * and Channel Transfer Complete for final completion
+         */
+        if (half)
+          {
+            ccr |= (1 << MDMA_CCR_BRTIE);  /* Block repeat transfer complete */
+          }
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        break;
 
-  //     case 3: /* Entire data transfer trigger mode */
-  //     default:
-  //       /* For single transfer mode, enable Channel Transfer Complete */
-  //       ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
-  //       if (half)
-  //         {
-  //           /* In this mode, we can enable buffer transfer complete
-  //            * to get intermediate notifications if buffer size < total size
-  //            */
-  //           ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
-  //         }
-  //       break;
-  //   }
+      case 3: /* Entire data transfer trigger mode */
+      default:
+        /* For single transfer mode, enable Channel Transfer Complete */
+        ccr |= (1 << MDMA_CCR_CTCIE);     /* Channel transfer complete */
+        if (half)
+          {
+            /* In this mode, we can enable buffer transfer complete
+             * to get intermediate notifications if buffer size < total size
+             */
+            ccr |= (1 << MDMA_CCR_TCIE);   /* Buffer transfer complete */
+          }
+        break;
+    }
 
   /* Write back the updated Channel Control Register to start the transfer */
 

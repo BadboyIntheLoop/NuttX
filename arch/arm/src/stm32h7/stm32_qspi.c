@@ -1534,18 +1534,21 @@ static int qspi_memory_dma(struct stm32h7_qspidev_s *priv,
 
       up_clean_dcache((uintptr_t)meminfo->buffer,
                       (uintptr_t)meminfo->buffer + meminfo->buflen);
+
+      // An always hack here, because paddr -> src_addr, maddr -> dst_addr
+      dmacfg.paddr = (uint32_t)meminfo->buffer;
+      dmacfg.maddr = qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET);
     }
   else
     {
       /* Setup the MDMA (peripheral-to-memory) */
 
       dmaflags = (QSPI_DMA_PRIO | MDMA_CCR_TCIE | MDMA_CCR_TEIE);
+      dmacfg.paddr = qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET);
+      dmacfg.maddr = (uint32_t)meminfo->buffer;
     }
 
   /* Configure the DMA */
-
-  dmacfg.paddr = qspi_regaddr(priv, STM32_QUADSPI_DR_OFFSET);
-  dmacfg.maddr = (uint32_t)meminfo->buffer;
   dmacfg.ndata = meminfo->buflen;
   dmacfg.cfg1  = dmaflags;
 
@@ -2377,26 +2380,18 @@ static int qspi_memory(struct qspi_dev_s *dev,
 #elif defined(CONFIG_STM32H7_QSPI_DMA)
   /* Can we perform DMA?  Should we perform DMA? */
 
-  spiinfo("DMA check: candma=%d, buflen=%zu, threshold=%d, buf_aligned=%d, len_aligned=%d\n",
-          priv->candma, meminfo->buflen, CONFIG_STM32H7_QSPI_DMATHRESHOLD,
-          IS_ALIGNED((uintptr_t)meminfo->buffer), IS_ALIGNED(meminfo->buflen));
-
   if (priv->candma &&
       meminfo->buflen > CONFIG_STM32H7_QSPI_DMATHRESHOLD &&
       IS_ALIGNED((uintptr_t)meminfo->buffer) &&
       IS_ALIGNED(meminfo->buflen))
     {
-      spiinfo("Using DMA mode for %zu bytes\n", meminfo->buflen);
       ret = qspi_memory_dma(priv, meminfo, &xctn);
     }
   else
     {
-      spiinfo("Using polling mode for %zu bytes\n", meminfo->buflen);
       /* polling mode */
 
-      /* Set up the Communications Configuration Register as per command
-       * info
-       */
+      /* Set up the Communications Configuration Register as per command info */
 
       qspi_ccrconfig(priv, &xctn,
                      QSPIMEM_ISWRITE(meminfo->flags) ? CCR_FMODE_INDWR :
